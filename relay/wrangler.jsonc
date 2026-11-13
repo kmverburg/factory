@@ -13,7 +13,8 @@
 
     // Linear project name -> GitHub repo ("owner/repo"). One line per app.
     "PROJECT_REPOS": {
-      "Example App": "kverburg/example-app"
+      "Backpack": "koenv/backpack",
+      "Feast": "koenv/feast"
     }
   }
 
