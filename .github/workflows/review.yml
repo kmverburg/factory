@@ -1,0 +1,166 @@
+# Reviewer agent. Reviews a pull request and decides whether a human needs to
+# look at it. Called from each app repo's factory.yml, both right after the
+# builder opens a PR and when someone opens a PR by hand.
+name: Factory review
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull request to review
+        required: true
+        type: string
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+      LINEAR_API_KEY:
+        required: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    env:
+      PR_NUMBER: ${{ inputs.pr_number }}
+      GH_TOKEN: ${{ github.token }}
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Linear helpers
+        run: |
+          cat > "$RUNNER_TEMP/linear.sh" <<'EOF'
+          linear_gql() {
+            [ -n "$LINEAR_API_KEY" ] || return 1
+            curl -sS --fail-with-body https://api.linear.app/graphql \
+              -H "Content-Type: application/json" -H "Authorization: $LINEAR_API_KEY" \
+              -d "$(jq -n --arg q "$1" --argjson v "$2" '{query: $q, variables: $v}')"
+          }
+          # Prints the issue's id, title, description and team states as JSON.
+          linear_issue() {
+            linear_gql 'query($id: String!) { issue(id: $id) { id identifier title description url team { states { nodes { id name } } } } }' \
+              "$(jq -n --arg id "$1" '{id: $id}')"
+          }
+          linear_set_state() {
+            local data state_id issue_uuid
+            data=$(linear_issue "$1") || { echo "::warning::Linear lookup failed"; return 0; }
+            issue_uuid=$(jq -r '.data.issue.id // empty' <<<"$data")
+            state_id=$(jq -r --arg n "$2" '.data.issue.team.states.nodes[] | select(.name == $n) | .id' <<<"$data" | head -n1)
+            if [ -z "$issue_uuid" ] || [ -z "$state_id" ]; then echo "::warning::Linear issue or state '$2' not found"; return 0; fi
+            linear_gql 'mutation($id: String!, $s: String!) { issueUpdate(id: $id, input: { stateId: $s }) { success } }' \
+              "$(jq -n --arg id "$issue_uuid" --arg s "$state_id" '{id: $id, s: $s}')" >/dev/null \
+              || echo "::warning::Linear state update failed"
+          }
+          linear_comment() {
+            local issue_uuid
+            issue_uuid=$(linear_issue "$1" | jq -r '.data.issue.id // empty') || true
+            [ -n "$issue_uuid" ] || { echo "::warning::Linear issue $1 not found"; return 0; }
+            linear_gql 'mutation($i: String!, $b: String!) { commentCreate(input: { issueId: $i, body: $b }) { success } }' \
+              "$(jq -n --arg i "$issue_uuid" --arg b "$2" '{i: $i, b: $b}')" >/dev/null \
+              || echo "::warning::Linear comment failed"
+          }
+          EOF
+
+      - name: Gather context
+        id: context
+        run: |
+          source "$RUNNER_TEMP/linear.sh"
+          mkdir -p .factory-review
+          gh pr view "$PR_NUMBER" --json title,body,headRefName,baseRefName,additions,deletions,changedFiles,files \
+            > .factory-review/pr.json
+          base=$(jq -r .baseRefName .factory-review/pr.json)
+          git diff "origin/$base...HEAD" > .factory-review/diff.patch
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+          # Linear identifier from the branch name (e.g. fac-12-fix-login -> FAC-12).
+          identifier=$(jq -r .headRefName .factory-review/pr.json | grep -oiE '^([a-z]+/)?[a-z0-9]+-[0-9]+' | sed -E 's#^.*/##' | tr '[:lower:]' '[:upper:]' || true)
+          echo "identifier=$identifier" >> "$GITHUB_OUTPUT"
+          if [ -n "$identifier" ] && issue=$(linear_issue "$identifier"); then
+            jq -r '.data.issue | "# \(.identifier): \(.title)\n\n\(.description // "")"' <<<"$issue" > .factory-review/ticket.md || true
+          fi
+          [ -s .factory-review/ticket.md ] || echo "No linked Linear ticket was found for this PR." > .factory-review/ticket.md
+
+      - name: Review with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: --max-turns 50 --allowedTools "Read,Write,Glob,Grep,Bash"
+          prompt: |
+            You are the reviewer agent in a small software factory. Your job is to decide whether the human owner
+            needs to look at pull request #${{ inputs.pr_number }} before it is merged. The owner only wants to be
+            involved when there is a real chance something is wrong or risky.
+
+            Context files (read them all):
+            - .factory-review/ticket.md: the Linear ticket the PR should implement
+            - .factory-review/pr.json: PR metadata, including line counts and changed files
+            - .factory-review/diff.patch: the full diff against ${{ steps.context.outputs.base }}
+            - CLAUDE.md (if present): repo commands, conventions and any "Factory review rules"
+
+            Run the repo's test, lint and build commands from CLAUDE.md to verify the change. Do not modify any
+            source files, commit or push. You are only reviewing.
+
+            Decide "escalate" if ANY of these is true, otherwise "approve":
+            - It touches authentication, authorisation, payments or billing, secrets, encryption or personal data handling.
+            - It changes the database schema, adds data migrations, or deletes or rewrites existing user data.
+            - It adds, removes or upgrades dependencies, or changes CI, deployment or infrastructure config.
+            - More than 400 lines changed, not counting lockfiles and generated files.
+            - Tests, lint or build fail, or behaviour changed without a test covering it.
+            - It doesn't meet the ticket's acceptance criteria, does more than the ticket asked, or there is no ticket.
+            - It breaks a rule in CLAUDE.md, including any "Factory review rules" section.
+            - You are not confident it is correct.
+
+            Write your verdict as JSON to .factory-review/verdict.json, exactly in this shape:
+            {"decision": "approve" | "escalate", "risk": "low" | "medium" | "high",
+             "summary": "two or three sentences on what the PR does and whether it does it well",
+             "reasons": ["each rule above that triggered, or concrete problems found; empty list when approving"],
+             "checks": "which commands you ran and whether they passed"}
+
+      - name: Publish verdict
+        env:
+          IDENTIFIER: ${{ steps.context.outputs.identifier }}
+        run: |
+          source "$RUNNER_TEMP/linear.sh"
+          verdict=.factory-review/verdict.json
+          if ! jq -e '.decision == "approve" or .decision == "escalate"' "$verdict" >/dev/null 2>&1; then
+            echo '{"decision":"escalate","risk":"high","summary":"The reviewer agent did not produce a valid verdict.","reasons":["No valid verdict.json"],"checks":"unknown"}' > "$verdict"
+          fi
+          decision=$(jq -r .decision "$verdict")
+          risk=$(jq -r '.risk // "unknown"' "$verdict")
+
+          {
+            if [ "$decision" = "approve" ]; then echo "### ✅ Factory review: approved (risk: $risk)"; else echo "### 🙋 Factory review: needs a human (risk: $risk)"; fi
+            echo
+            jq -r '.summary // ""' "$verdict"
+            if [ "$(jq '.reasons | length' "$verdict")" != "0" ]; then
+              echo; echo "**Why:**"; jq -r '.reasons[] | "- \(.)"' "$verdict"
+            fi
+            echo; echo "**Checks:** $(jq -r '.checks // "not reported"' "$verdict")"
+          } > "$RUNNER_TEMP/comment.md"
+          gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/comment.md"
+
+          gh label create agent-approved --color 0E8A16 --description "Factory reviewer found nothing risky" --force >/dev/null
+          gh label create needs-human --color D93F0B --description "Factory reviewer wants a human to look" --force >/dev/null
+          pr_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$PR_NUMBER"
+
+          if [ "$decision" = "approve" ]; then
+            gh pr edit "$PR_NUMBER" --add-label agent-approved --remove-label needs-human
+            [ -n "$IDENTIFIER" ] && linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Ready to merge."
+          else
+            gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-approved
+            if [ -n "$IDENTIFIER" ]; then
+              linear_comment "$IDENTIFIER" "$(printf '🙋 Reviewer agent wants you to look at %s\n\n' "$pr_url"; jq -r '.reasons[] | "- \(.)"' "$verdict")"
+              linear_set_state "$IDENTIFIER" "Needs Human"
+            fi
+          fi
+          exit 0

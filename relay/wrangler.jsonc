@@ -1,0 +1,23 @@
+{
+  // Must match the Worker's name in the Cloudflare dashboard.
+  "name": "factory-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "observability": { "enabled": true },
+
+  "vars": {
+    // Linear workflow state names (must match your team's statuses exactly).
+    "AGENT_READY_STATE": "Agent Ready",
+    "AGENT_WORKING_STATE": "Agent Working",
+    "NEEDS_HUMAN_STATE": "Needs Human",
+
+    // Linear project name -> GitHub repo ("owner/repo"). One line per app.
+    "PROJECT_REPOS": {
+      "Example App": "kverburg/example-app"
+    }
+  }
+
+  // Secrets are NOT stored here. Add them in the dashboard
+  // (Worker -> Settings -> Variables and Secrets, type "Secret"):
+  //   LINEAR_API_KEY, LINEAR_WEBHOOK_SECRET, GITHUB_TOKEN
+}
