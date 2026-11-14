@@ -146,6 +146,7 @@ jobs:
             exit 0
           fi
 
+          git remote set-url origin "https://github.com/$GITHUB_REPOSITORY.git"
           gh auth setup-git
           git push -u origin "$BRANCH"
           gh label create agent-built --color 5319E7 --description "Opened by the factory builder agent" --force >/dev/null
