@@ -233,6 +233,23 @@ jobs:
              "follow_ups": [{"title": "short imperative title", "description": "markdown"}],
              "checks": "which commands and browser checks you ran, and whether they passed"}
 
+      - name: Debug agent permissions (temporary)
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/claude-execution-output.json"
+          [ -f "$f" ] || { gh pr comment "$PR_NUMBER" --body "DEBUG: no execution output file"; exit 0; }
+          {
+            echo "DEBUG (temporary, safe to ignore)"
+            echo '```'
+            jq -c '[(if type=="array" then .[] else . end) | select(.type=="system" and .subtype=="init") | {permissionMode, tools, model}]' "$f" | head -c 1500
+            echo
+            jq -c '[(if type=="array" then .[] else . end) | select(.type=="result") | {is_error, num_turns, permission_denials}]' "$f" | head -c 1500
+            echo
+            jq -r '[(if type=="array" then .[] else . end) | select(.type=="user") | .message.content[]? | select(.type=="tool_result" and .is_error==true) | (.content|tostring)[0:300]] | .[0:5][]' "$f"
+            echo '```'
+          } > "$RUNNER_TEMP/debug.md"
+          gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/debug.md"
+
       - name: Publish verdict
         env:
           IDENTIFIER: ${{ steps.context.outputs.identifier }}
