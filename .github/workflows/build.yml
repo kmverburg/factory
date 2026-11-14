@@ -176,7 +176,6 @@ jobs:
           claude_args: >-
             --max-turns 100
             --allowedTools "Read,Write,Edit,MultiEdit,Glob,Grep,Bash"
-            --permission-mode bypassPermissions
           prompt: |
             You are the builder agent in a small software factory.
 
