@@ -1,0 +1,41 @@
+# Factory for the factory repo itself: Linear issues in the "Factory" project are built and
+# reviewed here. Same as templates/app-repo/.github/workflows/factory.yml.
+name: Factory
+
+on:
+  repository_dispatch:
+    # factory-build: sent by the relay when a Linear issue moves to "Agent Ready".
+    # factory-fix:   sent by the reviewer when it wants the builder to fix its PR.
+    types: [factory-build, factory-fix]
+  # PRs you open yourself get the same review (but are never changed automatically).
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: factory-${{ github.event.client_payload.identifier || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name == 'repository_dispatch'
+    uses: kverburg/factory/.github/workflows/build.yml@main
+    secrets: inherit
+
+  review:
+    needs: build
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+       needs.build.outputs.pr_number != '')
+    uses: kverburg/factory/.github/workflows/review.yml@main
+    with:
+      pr_number: ${{ needs.build.outputs.pr_number || github.event.pull_request.number }}
+      fix_round: ${{ github.event.client_payload.round || '0' }}
+    secrets: inherit

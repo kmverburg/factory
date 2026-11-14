@@ -76,7 +76,17 @@ Create a small, low-risk issue in a mapped project and move it to **Agent Ready*
 - **Follow-ups**: gaps in the repo itself (no tests, linter, docs) never block a PR. The reviewer files them as Linear issues in *Todo*, labelled `factory:follow-up`, in the same project (max 3 per review, no duplicates of open follow-ups). PRs for follow-up tickets don't create new follow-ups.
 - Nothing merges automatically. Merge `agent-approved` PRs yourself until you trust the reviewer, then consider enabling auto-merge for that label.
 
-The Linear helper functions are copied into both `build.yml` and `review.yml` (reusable workflows can't share files); change both when editing them.
+The workflows are thin: their logic (prompts, bash scripts, Linear helpers) lives in `agents/` and is fetched from `main` at run time. See `CLAUDE.md` for the layout.
+
+## Managing the factory with the factory
+
+Issues in the Linear project **Factory** are built and reviewed in this repo, just like an app. Agents can change everything except `.github/` (GitHub doesn't let workflow tokens push workflow files), and the reviewer always escalates changes to the prompts, the verdict logic and the relay's security, since those change how the factory judges itself. Merged changes to `agents/` go live for every app right away.
+
+One-time setup for this repo, the same as step 5 for an app:
+1. Repo secrets `CLAUDE_CODE_OAUTH_TOKEN` and `LINEAR_API_KEY`.
+2. Settings → Actions → General → *Allow GitHub Actions to create and approve pull requests*.
+3. The Claude GitHub App has access to this repo.
+4. The relay's GitHub token (`GITHUB_TOKEN` secret in Cloudflare) includes this repo, with *Contents: Read and write*.
 
 ## Safety notes
 
