@@ -13,6 +13,7 @@ e.g. Next.js 15, TypeScript, Postgres via Prisma, deployed on Cloudflare.
 - Test: `npm test`
 - Lint: `npm run lint`
 - Build: `npm run build`
+- Run locally: how to start the app so agents can open it in the headless browser (URL, port, test login if any).
 
 ## Conventions
 - Where things live (e.g. "API routes in src/app/api, shared UI in src/components").

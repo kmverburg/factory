@@ -1,12 +1,13 @@
-# Copy this file into each app repo as .github/workflows/factory.yml
-# and it already points at kverburg/factory.
+# Copy this file into each app repo as .github/workflows/factory.yml.
+# It already points at kverburg/factory.
 name: Factory
 
 on:
-  # Sent by the relay when a Linear issue moves to "Agent Ready".
   repository_dispatch:
-    types: [factory-build]
-  # PRs you open yourself get the same review.
+    # factory-build: sent by the relay when a Linear issue moves to "Agent Ready".
+    # factory-fix:   sent by the reviewer when it wants the builder to fix its PR.
+    types: [factory-build, factory-fix]
+  # PRs you open yourself get the same review (but are never changed automatically).
   pull_request:
     types: [opened, reopened, ready_for_review]
 
@@ -36,4 +37,5 @@ jobs:
     uses: kverburg/factory/.github/workflows/review.yml@main
     with:
       pr_number: ${{ needs.build.outputs.pr_number || github.event.pull_request.number }}
+      fix_round: ${{ github.event.client_payload.round || '0' }}
     secrets: inherit

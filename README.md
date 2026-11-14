@@ -68,9 +68,15 @@ Create a small, low-risk issue in a mapped project and move it to **Agent Ready*
 
 ## How decisions are made
 
-- **Builder** won't guess: if a ticket is unclear it comments questions on the Linear issue and moves it to *Needs Human*.
-- **Reviewer** escalates on auth, payments, secrets, personal data, schema or data changes, dependency or CI changes, more than 400 changed lines, failing checks, missing tests, scope creep, or low confidence. Add repo-specific rules under "Factory review rules" in that repo's `CLAUDE.md`.
+- **Builder** won't guess: if a ticket is unclear it comments questions on the Linear issue and moves it to *Needs Human*. It can check UI changes in a headless browser (Python Playwright) before opening the PR.
+- **Reviewer** runs the repo's checks, clicks through UI changes in the headless browser, and decides:
+  - **approve**: label `agent-approved`, Linear issue to *In Review*.
+  - **fix**: label `agent-fixing`; it sends concrete fix instructions back to the builder (`factory-fix` event), which pushes to the same PR, after which the reviewer checks again. At most 2 rounds, then it escalates. Only for PRs the factory opened.
+  - **escalate**: label `needs-human`, Linear issue to *Needs Human*. For auth, payments, secrets, personal data, schema changes, dependency or CI changes, more than 400 changed lines, scope problems, "Factory review rules" in the repo's `CLAUDE.md`, or anything it can't verify.
+- **Follow-ups**: gaps in the repo itself (no tests, linter, docs) never block a PR. The reviewer files them as Linear issues in *Todo*, labelled `factory:follow-up`, in the same project (max 3 per review, no duplicates of open follow-ups). PRs for follow-up tickets don't create new follow-ups.
 - Nothing merges automatically. Merge `agent-approved` PRs yourself until you trust the reviewer, then consider enabling auto-merge for that label.
+
+The Linear helper functions are copied into both `build.yml` and `review.yml` (reusable workflows can't share files); change both when editing them.
 
 ## Safety notes
 
@@ -81,5 +87,5 @@ Create a small, low-risk issue in a mapped project and move it to **Agent Ready*
 
 - **Nothing happens in Linear:** check the Worker's logs in Cloudflare (Observability tab) and the webhook's delivery log in Linear.
 - **"No GitHub repo is mapped":** the Linear project name doesn't exactly match a key in `PROJECT_REPOS`.
-- **Build fails at "Open pull request":** step 5.4 isn't enabled.
+- **Build fails at "Publish":** step 5.4 isn't enabled.
 - **App repo can't find the workflow:** step 1's access setting.

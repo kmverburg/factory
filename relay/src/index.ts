@@ -84,10 +84,18 @@ function isIssueStateEvent(payload: any): boolean {
 
 async function handleIssue(issueId: string, env: Env): Promise<void> {
   const issue = await getIssue(issueId, env);
-  if (!issue || issue.state.name !== env.AGENT_READY_STATE) return;
+  if (!issue) {
+    console.log(`Skipped ${issueId}: issue not found`);
+    return;
+  }
+  if (!sameName(issue.state.name, env.AGENT_READY_STATE)) {
+    console.log(`Skipped ${issue.identifier}: state is "${issue.state.name}", not "${env.AGENT_READY_STATE}"`);
+    return;
+  }
 
   const projectName = issue.project?.name;
-  const repo = projectName ? env.PROJECT_REPOS[projectName] : undefined;
+  const repo = projectName ? findRepo(projectName, env.PROJECT_REPOS) : undefined;
+  console.log(`${issue.identifier}: project "${projectName ?? "(none)"}" -> repo ${repo ?? "(none)"}`);
 
   if (!repo) {
     const reason = projectName
@@ -132,12 +140,24 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
     return;
   }
 
+  console.log(`${issue.identifier}: build started in ${repo}`);
   await setState(issue, env.AGENT_WORKING_STATE, env);
   await addComment(
     issue.id,
     `🏭 Picked up by the factory. Building in \`${repo}\`; progress is in [GitHub Actions](https://github.com/${repo}/actions).`,
     env,
   );
+}
+
+// ---------- Name matching (case-insensitive, ignores extra spaces) ----------
+
+function sameName(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function findRepo(projectName: string, repos: Record<string, string>): string | undefined {
+  const key = Object.keys(repos).find((k) => sameName(k, projectName));
+  return key ? repos[key] : undefined;
 }
 
 // ---------- Linear API ----------
@@ -172,7 +192,7 @@ async function getIssue(id: string, env: Env): Promise<LinearIssue | null> {
 }
 
 async function setState(issue: LinearIssue, stateName: string, env: Env): Promise<void> {
-  const state = issue.team.states.nodes.find((s) => s.name === stateName);
+  const state = issue.team.states.nodes.find((s) => sameName(s.name, stateName));
   if (!state) {
     console.warn(`Linear state "${stateName}" not found on the issue's team`);
     return;
