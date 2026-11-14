@@ -173,6 +173,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Fix rounds are started by the workflow bot (factory-fix event), so allow it.
+          allowed_bots: github-actions
           claude_args: >-
             --max-turns 100
             --allowedTools "Read,Write,Edit,MultiEdit,Glob,Grep,Bash"
