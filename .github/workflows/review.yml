@@ -181,7 +181,6 @@ jobs:
           claude_args: >-
             --max-turns 60
             --allowedTools "Read,Write,Glob,Grep,Bash"
-            --disallowedTools "Bash(git push:*),Bash(git commit:*),Bash(gh:*)"
           prompt: |
             You are the reviewer agent in a small software factory. Review pull request #${{ inputs.pr_number }}.
             The owner only wants to be involved when a human decision is really needed. Everything the builder agent
