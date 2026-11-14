@@ -1,6 +1,9 @@
-# Reviewer agent. Reviews a pull request and decides whether a human needs to
-# look at it. Called from each app repo's factory.yml, both right after the
-# builder opens a PR and when someone opens a PR by hand.
+# Reviewer agent. Called from each app repo's factory.yml after the builder opens
+# or updates a PR, and when someone opens a PR by hand. It decides:
+#   approve:  nothing to fix
+#   fix:      sends concrete changes back to the builder (agent PRs only, max 2 rounds)
+#   escalate: a human needs to look
+# and files repo-level gaps (tests, linting, docs) as follow-up tickets in Linear (Todo).
 name: Factory review
 
 on:
@@ -10,29 +13,40 @@ on:
         description: Pull request to review
         required: true
         type: string
+      fix_round:
+        description: How many automatic fix rounds this PR already had
+        required: false
+        type: string
+        default: "0"
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: true
       LINEAR_API_KEY:
         required: false
 
+env:
+  MAX_FIX_ROUNDS: 2
+  MAX_FOLLOW_UPS: 3
+
 jobs:
   review:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Pinned so the headless browser's system packages stay supported.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     permissions:
-      contents: read
+      contents: write # needed to send the factory-fix event
       pull-requests: write
       issues: write
       id-token: write
       actions: read
     env:
       PR_NUMBER: ${{ inputs.pr_number }}
+      FIX_ROUND: ${{ inputs.fix_round }}
       GH_TOKEN: ${{ github.token }}
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: refs/pull/${{ inputs.pr_number }}/head
           fetch-depth: 0
@@ -41,34 +55,79 @@ jobs:
       - name: Linear helpers
         run: |
           cat > "$RUNNER_TEMP/linear.sh" <<'EOF'
+          # Linear helpers. Identical copies live in build.yml and review.yml; change both.
+          # Every function warns instead of failing, so Linear problems never break a build.
           linear_gql() {
             [ -n "$LINEAR_API_KEY" ] || return 1
             curl -sS --fail-with-body https://api.linear.app/graphql \
               -H "Content-Type: application/json" -H "Authorization: $LINEAR_API_KEY" \
               -d "$(jq -n --arg q "$1" --argjson v "$2" '{query: $q, variables: $v}')"
           }
-          # Prints the issue's id, title, description and team states as JSON.
+          # $1 = issue identifier (KOE-6) or id. Prints the issue as JSON.
           linear_issue() {
-            linear_gql 'query($id: String!) { issue(id: $id) { id identifier title description url team { states { nodes { id name } } } } }' \
+            linear_gql 'query($id: String!) { issue(id: $id) { id identifier title description url project { id } labels { nodes { name } } team { id states { nodes { id name type } } labels { nodes { id name } } } } }' \
               "$(jq -n --arg id "$1" '{id: $id}')"
           }
+          # $1 = issue, $2 = state name (case-insensitive)
           linear_set_state() {
-            local data state_id issue_uuid
+            local data uuid state_id
             data=$(linear_issue "$1") || { echo "::warning::Linear lookup failed"; return 0; }
-            issue_uuid=$(jq -r '.data.issue.id // empty' <<<"$data")
-            state_id=$(jq -r --arg n "$2" '.data.issue.team.states.nodes[] | select(.name == $n) | .id' <<<"$data" | head -n1)
-            if [ -z "$issue_uuid" ] || [ -z "$state_id" ]; then echo "::warning::Linear issue or state '$2' not found"; return 0; fi
+            uuid=$(jq -r '.data.issue.id // empty' <<<"$data")
+            state_id=$(jq -r --arg n "$2" '.data.issue.team.states.nodes[] | select((.name | ascii_downcase) == ($n | ascii_downcase)) | .id' <<<"$data" | head -n1)
+            if [ -z "$uuid" ] || [ -z "$state_id" ]; then echo "::warning::Linear issue $1 or state '$2' not found"; return 0; fi
             linear_gql 'mutation($id: String!, $s: String!) { issueUpdate(id: $id, input: { stateId: $s }) { success } }' \
-              "$(jq -n --arg id "$issue_uuid" --arg s "$state_id" '{id: $id, s: $s}')" >/dev/null \
+              "$(jq -n --arg id "$uuid" --arg s "$state_id" '{id: $id, s: $s}')" >/dev/null \
               || echo "::warning::Linear state update failed"
           }
+          # $1 = issue, $2 = markdown body
           linear_comment() {
-            local issue_uuid
-            issue_uuid=$(linear_issue "$1" | jq -r '.data.issue.id // empty') || true
-            [ -n "$issue_uuid" ] || { echo "::warning::Linear issue $1 not found"; return 0; }
+            local uuid
+            uuid=$(linear_issue "$1" | jq -r '.data.issue.id // empty') || true
+            [ -n "$uuid" ] || { echo "::warning::Linear issue $1 not found"; return 0; }
             linear_gql 'mutation($i: String!, $b: String!) { commentCreate(input: { issueId: $i, body: $b }) { success } }' \
-              "$(jq -n --arg i "$issue_uuid" --arg b "$2" '{i: $i, b: $b}')" >/dev/null \
+              "$(jq -n --arg i "$uuid" --arg b "$2" '{i: $i, b: $b}')" >/dev/null \
               || echo "::warning::Linear comment failed"
+          }
+          FOLLOW_UP_LABEL="factory:follow-up"
+          # $1 = team id. Prints titles of open follow-up issues, one per line.
+          linear_open_follow_ups() {
+            linear_gql 'query($t: ID!, $l: String!) { issues(first: 100, filter: { team: { id: { eq: $t } }, labels: { some: { name: { eq: $l } } }, state: { type: { nin: ["completed", "canceled"] } } }) { nodes { identifier title } } }' \
+              "$(jq -n --arg t "$1" --arg l "$FOLLOW_UP_LABEL" '{t: $t, l: $l}')" \
+              | jq -r '.data.issues.nodes[] | "\(.identifier): \(.title)"'
+          }
+          # $1 = source issue, $2 = JSON file with [{title, description}], $3 = footer.
+          # Creates the issues in Todo (same team and project) and prints a markdown line per issue.
+          linear_create_follow_ups() {
+            local data team_id project_id state_id label_id existing item title desc input created
+            data=$(linear_issue "$1") || { echo "::warning::Linear lookup failed" >&2; return 0; }
+            team_id=$(jq -r '.data.issue.team.id // empty' <<<"$data")
+            [ -n "$team_id" ] || return 0
+            project_id=$(jq -r '.data.issue.project.id // empty' <<<"$data")
+            state_id=$(jq -r '[.data.issue.team.states.nodes[] | select((.name | ascii_downcase) == "todo")][0].id // empty' <<<"$data")
+            [ -n "$state_id" ] || state_id=$(jq -r '[.data.issue.team.states.nodes[] | select(.type == "backlog")][0].id // empty' <<<"$data")
+            label_id=$(jq -r --arg l "$FOLLOW_UP_LABEL" '[.data.issue.team.labels.nodes[] | select(.name == $l)][0].id // empty' <<<"$data")
+            if [ -z "$label_id" ]; then
+              label_id=$(linear_gql 'mutation($n: String!, $t: String!) { issueLabelCreate(input: { name: $n, teamId: $t, color: "#5E6AD2" }) { issueLabel { id } } }' \
+                "$(jq -n --arg n "$FOLLOW_UP_LABEL" --arg t "$team_id" '{n: $n, t: $t}')" | jq -r '.data.issueLabelCreate.issueLabel.id // empty') || true
+            fi
+            existing=$(linear_open_follow_ups "$team_id" | sed -E 's/^[^:]+: //' | tr '[:upper:]' '[:lower:]') || true
+            while IFS= read -r item; do
+              title=$(jq -r '.title' <<<"$item")
+              desc=$(jq -r '.description' <<<"$item")
+              if grep -qxF "$(tr '[:upper:]' '[:lower:]' <<<"$title")" <<<"$existing"; then
+                echo "::notice::Skipped duplicate follow-up: $title" >&2
+                continue
+              fi
+              input=$(jq -n --arg t "$team_id" --arg ti "$title" --arg d "$desc"$'\n\n---\n'"$3" --arg s "$state_id" --arg l "$label_id" --arg p "$project_id" \
+                '{teamId: $t, title: $ti, description: $d}
+                 + (if $s != "" then {stateId: $s} else {} end)
+                 + (if $l != "" then {labelIds: [$l]} else {} end)
+                 + (if $p != "" then {projectId: $p} else {} end)')
+              created=$(linear_gql 'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { issue { identifier url } } }' \
+                "$(jq -n --argjson i "$input" '{input: $i}')" | jq -r '.data.issueCreate.issue // empty | "- [\(.identifier)](\(.url)): "' 2>/dev/null) || true
+              if [ -z "$created" ]; then echo "::warning::Could not create follow-up: $title" >&2; continue; fi
+              echo "$created$title"
+            done < <(jq -c '.[]' "$2")
           }
           EOF
 
@@ -77,90 +136,192 @@ jobs:
         run: |
           source "$RUNNER_TEMP/linear.sh"
           mkdir -p .factory-review
-          gh pr view "$PR_NUMBER" --json title,body,headRefName,baseRefName,additions,deletions,changedFiles,files \
+          gh pr view "$PR_NUMBER" --json title,body,headRefName,baseRefName,additions,deletions,changedFiles,files,labels \
             > .factory-review/pr.json
           base=$(jq -r .baseRefName .factory-review/pr.json)
           git diff "origin/$base...HEAD" > .factory-review/diff.patch
           echo "base=$base" >> "$GITHUB_OUTPUT"
+          agent_pr=$(jq -r '[.labels[].name] | index("agent-built") != null' .factory-review/pr.json)
+          echo "agent_pr=$agent_pr" >> "$GITHUB_OUTPUT"
 
-          # Linear identifier from the branch name (e.g. fac-12-fix-login -> FAC-12).
+          # The previous factory review on this PR, so a fix round can be checked against it.
+          gh pr view "$PR_NUMBER" --json comments \
+            | jq -r '[.comments[] | select(.body | startswith("### ") and contains("Factory review"))] | last | .body // empty' \
+            > .factory-review/previous-review.md
+          [ -s .factory-review/previous-review.md ] || rm .factory-review/previous-review.md
+
+          # Linear identifier from the branch name (e.g. koe-6-edit-trip -> KOE-6).
           identifier=$(jq -r .headRefName .factory-review/pr.json | grep -oiE '^([a-z]+/)?[a-z0-9]+-[0-9]+' | sed -E 's#^.*/##' | tr '[:lower:]' '[:upper:]' || true)
-          echo "identifier=$identifier" >> "$GITHUB_OUTPUT"
-          if [ -n "$identifier" ] && issue=$(linear_issue "$identifier"); then
-            jq -r '.data.issue | "# \(.identifier): \(.title)\n\n\(.description // "")"' <<<"$issue" > .factory-review/ticket.md || true
+          is_follow_up=false
+          if [ -n "$identifier" ] && issue=$(linear_issue "$identifier") && [ "$(jq -r '.data.issue.id // empty' <<<"$issue")" != "" ]; then
+            jq -r '.data.issue | "# \(.identifier): \(.title)\n\n\(.description // "")"' <<<"$issue" > .factory-review/ticket.md
+            is_follow_up=$(jq -r --arg l "$FOLLOW_UP_LABEL" '[.data.issue.labels.nodes[].name] | index($l) != null' <<<"$issue")
+            team_id=$(jq -r '.data.issue.team.id' <<<"$issue")
+            linear_open_follow_ups "$team_id" > .factory-review/open-follow-ups.md || true
+          else
+            identifier=""
+            echo "No linked Linear ticket was found for this PR." > .factory-review/ticket.md
           fi
-          [ -s .factory-review/ticket.md ] || echo "No linked Linear ticket was found for this PR." > .factory-review/ticket.md
+          [ "$is_follow_up" = "true" ] && touch .factory-review/no-follow-ups
+          echo "identifier=$identifier" >> "$GITHUB_OUTPUT"
+          echo "is_follow_up=$is_follow_up" >> "$GITHUB_OUTPUT"
+
+      - name: Set up headless browser
+        continue-on-error: true
+        run: |
+          python3 -m venv "$RUNNER_TEMP/browser"
+          "$RUNNER_TEMP/browser/bin/pip" install --quiet playwright==1.64.1
+          "$RUNNER_TEMP/browser/bin/playwright" install --with-deps chromium
+          echo "$RUNNER_TEMP/browser/bin" >> "$GITHUB_PATH"
 
       - name: Review with Claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: --max-turns 50 --allowedTools "Read,Write,Glob,Grep,Bash"
+          claude_args: >-
+            --max-turns 60
+            --allowedTools "Read,Write,Glob,Grep,Bash"
+            --disallowedTools "Bash(git push:*),Bash(git commit:*),Bash(gh:*)"
           prompt: |
-            You are the reviewer agent in a small software factory. Your job is to decide whether the human owner
-            needs to look at pull request #${{ inputs.pr_number }} before it is merged. The owner only wants to be
-            involved when there is a real chance something is wrong or risky.
+            You are the reviewer agent in a small software factory. Review pull request #${{ inputs.pr_number }}.
+            The owner only wants to be involved when a human decision is really needed. Everything the builder agent
+            can fix itself should go back to the builder.
 
-            Context files (read them all):
-            - .factory-review/ticket.md: the Linear ticket the PR should implement
-            - .factory-review/pr.json: PR metadata, including line counts and changed files
-            - .factory-review/diff.patch: the full diff against ${{ steps.context.outputs.base }}
-            - CLAUDE.md (if present): repo commands, conventions and any "Factory review rules"
+            Context files in .factory-review/ (read them all):
+            - ticket.md: the Linear ticket the PR should implement
+            - pr.json: PR metadata, including line counts and changed files
+            - diff.patch: the full diff against ${{ steps.context.outputs.base }}
+            - previous-review.md (if present): your last review; this is fix round ${{ inputs.fix_round }}, so check
+              that every requested fix was done
+            - open-follow-ups.md (if present): follow-up tickets that already exist; never propose duplicates
+            - no-follow-ups (if present): this PR is itself a follow-up, so leave follow_ups empty
+            Also read CLAUDE.md (if present) for commands, conventions and "Factory review rules".
 
-            Run the repo's test, lint and build commands from CLAUDE.md to verify the change. Do not modify any
-            source files, commit or push. You are only reviewing.
+            Verify, don't guess:
+            - Run the repo's test, lint and build commands from CLAUDE.md.
+            - If the PR changes a web UI, check it in a real browser. A headless Chromium is available through Python
+              Playwright (`python3` can `import playwright`). Start the app as CLAUDE.md describes, write a throwaway
+              script under .factory-review/ that clicks through the changed flow and its edge cases (including what
+              happens to existing data), and save screenshots under .factory-review/ that you then Read to look at.
+            - Do not modify source files, commit or push. You are only reviewing.
 
-            Decide "escalate" if ANY of these is true, otherwise "approve":
-            - It touches authentication, authorisation, payments or billing, secrets, encryption or personal data handling.
-            - It changes the database schema, adds data migrations, or deletes or rewrites existing user data.
-            - It adds, removes or upgrades dependencies, or changes CI, deployment or infrastructure config.
-            - More than 400 lines changed, not counting lockfiles and generated files.
-            - Tests, lint or build fail, or behaviour changed without a test covering it.
-            - It doesn't meet the ticket's acceptance criteria, does more than the ticket asked, or there is no ticket.
-            - It breaks a rule in CLAUDE.md, including any "Factory review rules" section.
-            - You are not confident it is correct.
+            Decide one of:
+            - "approve": it meets the ticket, you verified it works, and you found no problems.
+            - "fix": there are concrete problems the builder can fix within this PR's scope, such as bugs, missed
+              edge cases, existing user data being lost or overwritten when the code could avoid it, missing tests
+              where the repo has a test setup, or broken behaviour you saw in the browser. Each item in fix_requests
+              must be a specific, actionable instruction.
+            - "escalate": a human must decide. Use it when the PR touches authentication, authorisation, payments,
+              secrets, encryption or personal data handling; changes CI, deployment or infrastructure config; adds,
+              removes or upgrades dependencies; changes a database schema or deliberately deletes stored data because
+              the ticket asks for it; changes more than 400 lines (not counting lockfiles and generated files); does
+              something different from the ticket, or the ticket is too vague to judge; breaks a "Factory review
+              rule" in CLAUDE.md; or you can't verify it works and no fix would change that.
+
+            Gaps in the repo itself (no test suite, no linter, no CLAUDE.md, missing CI checks) are never a reason to
+            fix or escalate on their own. Put them in follow_ups instead. Follow-ups must not contain work this PR
+            needs in order to be correct. Propose at most ${{ env.MAX_FOLLOW_UPS }}, only when clearly worthwhile, each
+            as a standalone ticket whose description has "## Goal", "## Acceptance criteria" (a checklist) and
+            "## Out of scope" sections.
 
             Write your verdict as JSON to .factory-review/verdict.json, exactly in this shape:
-            {"decision": "approve" | "escalate", "risk": "low" | "medium" | "high",
-             "summary": "two or three sentences on what the PR does and whether it does it well",
-             "reasons": ["each rule above that triggered, or concrete problems found; empty list when approving"],
-             "checks": "which commands you ran and whether they passed"}
+            {"decision": "approve" | "fix" | "escalate",
+             "risk": "low" | "medium" | "high",
+             "summary": "two or three sentences on what the PR does and how well",
+             "reasons": ["why you chose fix or escalate; empty when approving"],
+             "fix_requests": ["specific instructions for the builder; empty unless decision is fix"],
+             "follow_ups": [{"title": "short imperative title", "description": "markdown"}],
+             "checks": "which commands and browser checks you ran, and whether they passed"}
 
       - name: Publish verdict
         env:
           IDENTIFIER: ${{ steps.context.outputs.identifier }}
+          IS_FOLLOW_UP: ${{ steps.context.outputs.is_follow_up }}
+          AGENT_PR: ${{ steps.context.outputs.agent_pr }}
         run: |
           source "$RUNNER_TEMP/linear.sh"
-          verdict=.factory-review/verdict.json
-          if ! jq -e '.decision == "approve" or .decision == "escalate"' "$verdict" >/dev/null 2>&1; then
-            echo '{"decision":"escalate","risk":"high","summary":"The reviewer agent did not produce a valid verdict.","reasons":["No valid verdict.json"],"checks":"unknown"}' > "$verdict"
+          v=.factory-review/verdict.json
+          pr_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$PR_NUMBER"
+          round=${FIX_ROUND:-0}
+
+          if ! jq -e '.decision == "approve" or .decision == "fix" or .decision == "escalate"' "$v" >/dev/null 2>&1; then
+            echo '{"decision":"escalate","risk":"high","summary":"The reviewer agent did not produce a valid verdict.","reasons":["No valid verdict.json"],"fix_requests":[],"follow_ups":[],"checks":"unknown"}' > "$v"
           fi
-          decision=$(jq -r .decision "$verdict")
-          risk=$(jq -r '.risk // "unknown"' "$verdict")
+          decision=$(jq -r .decision "$v")
+
+          # Automatic fixes only for agent PRs with a ticket, and only a limited number of rounds.
+          if [ "$decision" = "fix" ]; then
+            why=""
+            if [ "$(jq '.fix_requests // [] | length' "$v")" = "0" ]; then why="The reviewer asked for fixes but didn't list any."
+            elif [ "$AGENT_PR" != "true" ] || [ -z "$IDENTIFIER" ]; then why="Fixes are needed, but this PR wasn't opened by the factory, so it isn't changed automatically."
+            elif [ "$round" -ge "$MAX_FIX_ROUNDS" ]; then why="Still needs fixes after $MAX_FIX_ROUNDS automatic rounds."
+            fi
+            if [ -n "$why" ]; then
+              jq --arg w "$why" '.decision = "escalate" | .reasons = ((.reasons // []) + [$w])' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
+              decision=escalate
+            fi
+          fi
+          risk=$(jq -r '.risk // "unknown"' "$v")
+
+          # Follow-up tickets (Todo), never from a PR that is itself a follow-up.
+          created=""
+          if [ -n "$IDENTIFIER" ] && [ "$IS_FOLLOW_UP" != "true" ]; then
+            jq --argjson n "$MAX_FOLLOW_UPS" '[.follow_ups // [] | .[] | select((.title // "") != "" and (.description // "") != "")] | .[:$n]' "$v" > "$RUNNER_TEMP/follow_ups.json"
+            if [ "$(jq length "$RUNNER_TEMP/follow_ups.json")" != "0" ]; then
+              created=$(linear_create_follow_ups "$IDENTIFIER" "$RUNNER_TEMP/follow_ups.json" "Found by the factory reviewer on $pr_url (follow-up to $IDENTIFIER).") || true
+            fi
+          fi
 
           {
-            if [ "$decision" = "approve" ]; then echo "### ✅ Factory review: approved (risk: $risk)"; else echo "### 🙋 Factory review: needs a human (risk: $risk)"; fi
+            case "$decision" in
+              approve) echo "### ✅ Factory review: approved (risk: $risk)" ;;
+              fix) echo "### 🔧 Factory review: sending fixes to the builder (round $((round + 1)) of $MAX_FIX_ROUNDS, risk: $risk)" ;;
+              *) echo "### 🙋 Factory review: needs a human (risk: $risk)" ;;
+            esac
             echo
-            jq -r '.summary // ""' "$verdict"
-            if [ "$(jq '.reasons | length' "$verdict")" != "0" ]; then
-              echo; echo "**Why:**"; jq -r '.reasons[] | "- \(.)"' "$verdict"
+            jq -r '.summary // ""' "$v"
+            if [ "$(jq '.reasons // [] | length' "$v")" != "0" ]; then
+              echo; echo "**Why:**"; jq -r '.reasons[] | "- \(.)"' "$v"
             fi
-            echo; echo "**Checks:** $(jq -r '.checks // "not reported"' "$verdict")"
+            if [ "$(jq '.fix_requests // [] | length' "$v")" != "0" ]; then
+              echo; echo "**Fixes requested:**"; jq -r '.fix_requests[] | "- \(.)"' "$v"
+            fi
+            if [ -n "$created" ]; then
+              echo; echo "**Follow-up tickets created (Todo):**"; echo "$created"
+            fi
+            echo; echo "**Checks:** $(jq -r '.checks // "not reported"' "$v")"
           } > "$RUNNER_TEMP/comment.md"
           gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/comment.md"
 
           gh label create agent-approved --color 0E8A16 --description "Factory reviewer found nothing risky" --force >/dev/null
-          gh label create needs-human --color D93F0B --description "Factory reviewer wants a human to look" --force >/dev/null
-          pr_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$PR_NUMBER"
+          gh label create agent-fixing --color FBCA04 --description "Builder agent is applying review fixes" --force >/dev/null
+          gh label create needs-human --color D93F0B --description "Factory wants a human to look" --force >/dev/null
+          follow_note=""
+          [ -n "$created" ] && follow_note=$(printf '\n\nFollow-up tickets created:\n%s' "$created")
 
-          if [ "$decision" = "approve" ]; then
-            gh pr edit "$PR_NUMBER" --add-label agent-approved --remove-label needs-human
-            [ -n "$IDENTIFIER" ] && linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Ready to merge."
-          else
-            gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-approved
-            if [ -n "$IDENTIFIER" ]; then
-              linear_comment "$IDENTIFIER" "$(printf '🙋 Reviewer agent wants you to look at %s\n\n' "$pr_url"; jq -r '.reasons[] | "- \(.)"' "$verdict")"
-              linear_set_state "$IDENTIFIER" "Needs Human"
-            fi
-          fi
+          case "$decision" in
+            approve)
+              gh pr edit "$PR_NUMBER" --add-label agent-approved --remove-label needs-human --remove-label agent-fixing
+              if [ -n "$IDENTIFIER" ]; then
+                linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Ready to merge.$follow_note"
+                linear_set_state "$IDENTIFIER" "In Review"
+              fi
+              ;;
+            fix)
+              gh pr edit "$PR_NUMBER" --add-label agent-fixing --remove-label needs-human --remove-label agent-approved
+              feedback=$(jq -r '.fix_requests[] | "- \(.)"' "$v")
+              jq -n --arg pr "$PR_NUMBER" --arg round "$((round + 1))" --arg id "$IDENTIFIER" --arg fb "$feedback" \
+                '{event_type: "factory-fix", client_payload: {pr_number: $pr, round: $round, identifier: $id, feedback: $fb}}' \
+                > "$RUNNER_TEMP/dispatch.json"
+              gh api "repos/$GITHUB_REPOSITORY/dispatches" --input "$RUNNER_TEMP/dispatch.json"
+              linear_comment "$IDENTIFIER" "$(printf '🔧 Reviewer asked for fixes on %s (round %s of %s). The builder is on it:\n\n%s%s' "$pr_url" "$((round + 1))" "$MAX_FIX_ROUNDS" "$feedback" "$follow_note")"
+              ;;
+            *)
+              gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-approved --remove-label agent-fixing
+              if [ -n "$IDENTIFIER" ]; then
+                linear_comment "$IDENTIFIER" "$(printf '🙋 Reviewer agent wants you to look at %s\n\n' "$pr_url"; jq -r '.reasons[]? | "- \(.)"' "$v"; printf '%s' "$follow_note")"
+                linear_set_state "$IDENTIFIER" "Needs Human"
+              fi
+              ;;
+          esac
           exit 0

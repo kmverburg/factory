@@ -1,12 +1,13 @@
-# Builder agent. Called from each app repo's factory.yml when the relay
-# sends a `factory-build` repository_dispatch event for a Linear issue.
+# Builder agent. Called from each app repo's factory.yml for two events:
+#   factory-build: a Linear issue moved to "Agent Ready" (sent by the relay)
+#   factory-fix:   the reviewer asked for changes on an agent PR (sent by review.yml)
 name: Factory build
 
 on:
   workflow_call:
     outputs:
       pr_number:
-        description: Number of the pull request the agent opened (empty if none)
+        description: Pull request that was opened or updated (empty if none)
         value: ${{ jobs.build.outputs.pr_number }}
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
@@ -16,8 +17,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Pinned so the headless browser's system packages stay supported.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions:
       contents: write
       pull-requests: write
@@ -28,21 +30,28 @@ jobs:
       pr_number: ${{ steps.publish.outputs.pr_number }}
     env:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
-      ISSUE_ID: ${{ github.event.client_payload.issue_id }}
+      GH_TOKEN: ${{ github.token }}
+      EVENT_TYPE: ${{ github.event.action }}
       ISSUE_IDENTIFIER: ${{ github.event.client_payload.identifier }}
       ISSUE_TITLE: ${{ github.event.client_payload.title }}
+      ISSUE_DESCRIPTION: ${{ github.event.client_payload.description }}
       ISSUE_URL: ${{ github.event.client_payload.url }}
-      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+      FIX_ROUND: ${{ github.event.client_payload.round }}
+      FIX_FEEDBACK: ${{ github.event.client_payload.feedback }}
 
     steps:
-      - name: Check ticket
+      - name: Check event
         run: |
+          case "$EVENT_TYPE" in factory-build|factory-fix) ;; *) echo "::error::Unknown event '$EVENT_TYPE'"; exit 1 ;; esac
           if [[ ! "$ISSUE_IDENTIFIER" =~ ^[A-Z0-9]+-[0-9]+$ ]]; then
-            echo "::error::Missing or invalid Linear identifier: '$ISSUE_IDENTIFIER'"
-            exit 1
+            echo "::error::Missing or invalid Linear identifier: '$ISSUE_IDENTIFIER'"; exit 1
+          fi
+          if [ "$EVENT_TYPE" = "factory-fix" ] && { [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]] || [[ ! "$FIX_ROUND" =~ ^[0-9]+$ ]]; }; then
+            echo "::error::factory-fix needs a numeric pr_number and round"; exit 1
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -50,116 +59,235 @@ jobs:
       - name: Linear helpers
         run: |
           cat > "$RUNNER_TEMP/linear.sh" <<'EOF'
+          # Linear helpers. Identical copies live in build.yml and review.yml; change both.
+          # Every function warns instead of failing, so Linear problems never break a build.
           linear_gql() {
+            [ -n "$LINEAR_API_KEY" ] || return 1
             curl -sS --fail-with-body https://api.linear.app/graphql \
               -H "Content-Type: application/json" -H "Authorization: $LINEAR_API_KEY" \
               -d "$(jq -n --arg q "$1" --argjson v "$2" '{query: $q, variables: $v}')"
           }
+          # $1 = issue identifier (KOE-6) or id. Prints the issue as JSON.
+          linear_issue() {
+            linear_gql 'query($id: String!) { issue(id: $id) { id identifier title description url project { id } labels { nodes { name } } team { id states { nodes { id name type } } labels { nodes { id name } } } } }' \
+              "$(jq -n --arg id "$1" '{id: $id}')"
+          }
+          # $1 = issue, $2 = state name (case-insensitive)
           linear_set_state() {
-            local data state_id
-            data=$(linear_gql 'query($id: String!) { issue(id: $id) { team { states { nodes { id name } } } } }' \
-              "$(jq -n --arg id "$1" '{id: $id}')") || { echo "::warning::Linear lookup failed"; return 0; }
-            state_id=$(jq -r --arg n "$2" '.data.issue.team.states.nodes[] | select(.name == $n) | .id' <<<"$data" | head -n1)
-            if [ -z "$state_id" ]; then echo "::warning::Linear state '$2' not found"; return 0; fi
+            local data uuid state_id
+            data=$(linear_issue "$1") || { echo "::warning::Linear lookup failed"; return 0; }
+            uuid=$(jq -r '.data.issue.id // empty' <<<"$data")
+            state_id=$(jq -r --arg n "$2" '.data.issue.team.states.nodes[] | select((.name | ascii_downcase) == ($n | ascii_downcase)) | .id' <<<"$data" | head -n1)
+            if [ -z "$uuid" ] || [ -z "$state_id" ]; then echo "::warning::Linear issue $1 or state '$2' not found"; return 0; fi
             linear_gql 'mutation($id: String!, $s: String!) { issueUpdate(id: $id, input: { stateId: $s }) { success } }' \
-              "$(jq -n --arg id "$1" --arg s "$state_id" '{id: $id, s: $s}')" >/dev/null \
+              "$(jq -n --arg id "$uuid" --arg s "$state_id" '{id: $id, s: $s}')" >/dev/null \
               || echo "::warning::Linear state update failed"
           }
+          # $1 = issue, $2 = markdown body
           linear_comment() {
+            local uuid
+            uuid=$(linear_issue "$1" | jq -r '.data.issue.id // empty') || true
+            [ -n "$uuid" ] || { echo "::warning::Linear issue $1 not found"; return 0; }
             linear_gql 'mutation($i: String!, $b: String!) { commentCreate(input: { issueId: $i, body: $b }) { success } }' \
-              "$(jq -n --arg i "$1" --arg b "$2" '{i: $i, b: $b}')" >/dev/null \
+              "$(jq -n --arg i "$uuid" --arg b "$2" '{i: $i, b: $b}')" >/dev/null \
               || echo "::warning::Linear comment failed"
+          }
+          FOLLOW_UP_LABEL="factory:follow-up"
+          # $1 = team id. Prints titles of open follow-up issues, one per line.
+          linear_open_follow_ups() {
+            linear_gql 'query($t: ID!, $l: String!) { issues(first: 100, filter: { team: { id: { eq: $t } }, labels: { some: { name: { eq: $l } } }, state: { type: { nin: ["completed", "canceled"] } } }) { nodes { identifier title } } }' \
+              "$(jq -n --arg t "$1" --arg l "$FOLLOW_UP_LABEL" '{t: $t, l: $l}')" \
+              | jq -r '.data.issues.nodes[] | "\(.identifier): \(.title)"'
+          }
+          # $1 = source issue, $2 = JSON file with [{title, description}], $3 = footer.
+          # Creates the issues in Todo (same team and project) and prints a markdown line per issue.
+          linear_create_follow_ups() {
+            local data team_id project_id state_id label_id existing item title desc input created
+            data=$(linear_issue "$1") || { echo "::warning::Linear lookup failed" >&2; return 0; }
+            team_id=$(jq -r '.data.issue.team.id // empty' <<<"$data")
+            [ -n "$team_id" ] || return 0
+            project_id=$(jq -r '.data.issue.project.id // empty' <<<"$data")
+            state_id=$(jq -r '[.data.issue.team.states.nodes[] | select((.name | ascii_downcase) == "todo")][0].id // empty' <<<"$data")
+            [ -n "$state_id" ] || state_id=$(jq -r '[.data.issue.team.states.nodes[] | select(.type == "backlog")][0].id // empty' <<<"$data")
+            label_id=$(jq -r --arg l "$FOLLOW_UP_LABEL" '[.data.issue.team.labels.nodes[] | select(.name == $l)][0].id // empty' <<<"$data")
+            if [ -z "$label_id" ]; then
+              label_id=$(linear_gql 'mutation($n: String!, $t: String!) { issueLabelCreate(input: { name: $n, teamId: $t, color: "#5E6AD2" }) { issueLabel { id } } }' \
+                "$(jq -n --arg n "$FOLLOW_UP_LABEL" --arg t "$team_id" '{n: $n, t: $t}')" | jq -r '.data.issueLabelCreate.issueLabel.id // empty') || true
+            fi
+            existing=$(linear_open_follow_ups "$team_id" | sed -E 's/^[^:]+: //' | tr '[:upper:]' '[:lower:]') || true
+            while IFS= read -r item; do
+              title=$(jq -r '.title' <<<"$item")
+              desc=$(jq -r '.description' <<<"$item")
+              if grep -qxF "$(tr '[:upper:]' '[:lower:]' <<<"$title")" <<<"$existing"; then
+                echo "::notice::Skipped duplicate follow-up: $title" >&2
+                continue
+              fi
+              input=$(jq -n --arg t "$team_id" --arg ti "$title" --arg d "$desc"$'\n\n---\n'"$3" --arg s "$state_id" --arg l "$label_id" --arg p "$project_id" \
+                '{teamId: $t, title: $ti, description: $d}
+                 + (if $s != "" then {stateId: $s} else {} end)
+                 + (if $l != "" then {labelIds: [$l]} else {} end)
+                 + (if $p != "" then {projectId: $p} else {} end)')
+              created=$(linear_gql 'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { issue { identifier url } } }' \
+                "$(jq -n --argjson i "$input" '{input: $i}')" | jq -r '.data.issueCreate.issue // empty | "- [\(.identifier)](\(.url)): "' 2>/dev/null) || true
+              if [ -z "$created" ]; then echo "::warning::Could not create follow-up: $title" >&2; continue; fi
+              echo "$created$title"
+            done < <(jq -c '.[]' "$2")
           }
           EOF
 
-      - name: Create branch
+      - name: Prepare workspace
         id: branch
         run: |
-          slug=$(printf '%s' "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-40 | sed -E 's/-+$//')
-          branch="$(printf '%s' "$ISSUE_IDENTIFIER" | tr '[:upper:]' '[:lower:]')-${slug:-task}"
-          git checkout -b "$branch"
+          source "$RUNNER_TEMP/linear.sh"
+          mkdir -p .factory
+          if [ "$EVENT_TYPE" = "factory-build" ]; then
+            slug=$(printf '%s' "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-40 | sed -E 's/-+$//')
+            branch="$(printf '%s' "$ISSUE_IDENTIFIER" | tr '[:upper:]' '[:lower:]')-${slug:-task}"
+            git checkout -b "$branch"
+            printf '# %s: %s\n\n%s\n' "$ISSUE_IDENTIFIER" "$ISSUE_TITLE" "$ISSUE_DESCRIPTION" > .factory/ticket.md
+          else
+            pr=$(gh pr view "$PR_NUMBER" --json headRefName,state,body)
+            if [ "$(jq -r .state <<<"$pr")" != "OPEN" ]; then echo "::error::PR #$PR_NUMBER is not open"; exit 1; fi
+            branch=$(jq -r .headRefName <<<"$pr")
+            git checkout -B "$branch" "origin/$branch"
+            if issue=$(linear_issue "$ISSUE_IDENTIFIER") && [ "$(jq -r '.data.issue.id // empty' <<<"$issue")" != "" ]; then
+              jq -r '.data.issue | "# \(.identifier): \(.title)\n\n\(.description // "")"' <<<"$issue" > .factory/ticket.md
+            else
+              jq -r .body <<<"$pr" > .factory/ticket.md
+            fi
+            printf '%s\n' "$FIX_FEEDBACK" > .factory/review-feedback.md
+            linear_set_state "$ISSUE_IDENTIFIER" "Agent Working"
+          fi
           echo "name=$branch" >> "$GITHUB_OUTPUT"
           echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          mkdir -p .factory
+
+      - name: Set up headless browser
+        continue-on-error: true
+        run: |
+          python3 -m venv "$RUNNER_TEMP/browser"
+          "$RUNNER_TEMP/browser/bin/pip" install --quiet playwright==1.64.1
+          "$RUNNER_TEMP/browser/bin/playwright" install --with-deps chromium
+          echo "$RUNNER_TEMP/browser/bin" >> "$GITHUB_PATH"
 
       - name: Build with Claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: --max-turns 80 --allowedTools "Read,Write,Edit,MultiEdit,Glob,Grep,Bash"
+          claude_args: >-
+            --max-turns 100
+            --allowedTools "Read,Write,Edit,MultiEdit,Glob,Grep,Bash"
+            --disallowedTools "Bash(git push:*),Bash(git commit:*),Bash(gh:*)"
           prompt: |
-            You are the builder agent in a small software factory. Implement the ticket below in this repository.
+            You are the builder agent in a small software factory.
 
-            <ticket id="${{ github.event.client_payload.identifier }}">
-            Title: ${{ github.event.client_payload.title }}
-
-            ${{ github.event.client_payload.description }}
-            </ticket>
+            The ticket to implement is in .factory/ticket.md. If .factory/review-feedback.md exists, you are
+            fixing an existing pull request instead: the repository already contains your earlier work for this
+            ticket, and the reviewer agent asked for the changes listed in that file. Address every point and keep
+            the rest of the earlier work.
 
             How to work:
             1. Read CLAUDE.md (if present) first. It has this repo's commands, conventions and off-limits areas.
             2. Make the smallest change that fully meets the ticket's acceptance criteria. Match the existing code style.
-            3. Add or update tests for behaviour you change, then run the repo's test, lint and build commands and fix what fails.
-            4. Do NOT commit, push, create branches or open pull requests. The workflow does that after you finish.
-            5. Never edit files under .github/, never read or change .env files or secrets, and never add credentials to code.
+            3. Add or update tests for behaviour you change if the repo has a test setup. Run the repo's test, lint
+               and build commands and fix what fails.
+            4. If the change affects a web UI, check it in a real browser. A headless Chromium is available through
+               Python Playwright (`python3` can `import playwright`). Start the app as CLAUDE.md describes, write a
+               throwaway script under .factory/ that clicks through the changed flow and its edge cases, and save
+               screenshots under .factory/ that you then Read to look at. Fix what you find.
+            5. Do NOT commit, push, create branches or open pull requests. The workflow does that after you finish.
+            6. Never edit files under .github/, never read or change .env files or secrets, and never add credentials to code.
+            7. Everything under .factory/ is thrown away. Never put real code there.
 
-            When you are done, write a pull request description to .factory/PR_BODY.md with these sections:
-            ## Summary (what changed and why), ## How I tested it (commands you ran and their results), ## Risks (anything a reviewer should look at closely, or "None known").
+            When you are done, write a description of your work to .factory/PR_BODY.md with these sections:
+            ## Summary (what changed and why), ## How I tested it (commands and browser checks you ran, and their
+            results), ## Risks (anything a reviewer should look at closely, or "None known").
 
-            If the ticket is ambiguous, contradicts the code, or can't be done safely, make NO code changes. Instead write
-            your specific questions to .factory/QUESTIONS.md and stop. Asking is better than guessing.
+            If the ticket or feedback is ambiguous, contradicts the code, or can't be done safely, make NO code changes.
+            Instead write your specific questions to .factory/QUESTIONS.md and stop. Asking is better than guessing.
 
-      - name: Open pull request
+      - name: Publish
         id: publish
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
           BASE_SHA: ${{ steps.branch.outputs.base_sha }}
         run: |
           source "$RUNNER_TEMP/linear.sh"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh label create needs-human --color D93F0B --description "Factory wants a human to look" --force >/dev/null
 
           if [ -s .factory/QUESTIONS.md ]; then
-            linear_comment "$ISSUE_ID" "🤔 The builder agent needs input before it can start:
-
-          $(cat .factory/QUESTIONS.md)
-
-          Update the ticket, then move it back to **Agent Ready**."
-            linear_set_state "$ISSUE_ID" "Needs Human"
+            questions=$(cat .factory/QUESTIONS.md)
+            if [ "$EVENT_TYPE" = "factory-fix" ]; then
+              gh pr comment "$PR_NUMBER" --body "$(printf '🤔 The builder agent needs input before it can apply the review fixes:\n\n%s' "$questions")"
+              gh pr edit "$PR_NUMBER" --add-label needs-human
+            fi
+            linear_comment "$ISSUE_IDENTIFIER" "$(printf '🤔 The builder agent needs input:\n\n%s\n\nUpdate the ticket, then move it back to **Agent Ready**.' "$questions")"
+            linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
             exit 0
           fi
 
           body_file="$RUNNER_TEMP/pr_body.md"
-          {
-            echo "Linear: [$ISSUE_IDENTIFIER]($ISSUE_URL)"
-            echo
-            if [ -s .factory/PR_BODY.md ]; then cat .factory/PR_BODY.md; else echo "_The agent didn't write a summary._"; fi
-          } > "$body_file"
+          if [ -s .factory/PR_BODY.md ]; then cp .factory/PR_BODY.md "$body_file"; else echo "_The agent didn't write a summary._" > "$body_file"; fi
           rm -rf .factory
 
+          if [ "$EVENT_TYPE" = "factory-build" ]; then
+            message="$ISSUE_IDENTIFIER: $ISSUE_TITLE"
+          else
+            message="$ISSUE_IDENTIFIER: address review feedback (round $FIX_ROUND)"
+          fi
           git add -A
           if ! git diff --cached --quiet; then
-            git -c user.name="factory-bot" -c user.email="factory-bot@users.noreply.github.com" \
-              commit -q -m "$ISSUE_IDENTIFIER: $ISSUE_TITLE"
+            git -c user.name="factory-bot" -c user.email="factory-bot@users.noreply.github.com" commit -q -m "$message"
           fi
           if [ "$(git rev-list --count "$BASE_SHA"..HEAD)" = "0" ]; then
-            linear_comment "$ISSUE_ID" "🏭 The builder agent finished without changing any code. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            linear_set_state "$ISSUE_ID" "Needs Human"
+            if [ "$EVENT_TYPE" = "factory-fix" ]; then
+              gh pr comment "$PR_NUMBER" --body "🏭 The builder agent couldn't apply the review fixes (no changes). Run: $run_url"
+              gh pr edit "$PR_NUMBER" --add-label needs-human
+            fi
+            linear_comment "$ISSUE_IDENTIFIER" "🏭 The builder agent finished without changing any code. Run: $run_url"
+            linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
             exit 0
           fi
 
+          # The Claude action leaves its (now revoked) token in the remote URL; use the workflow's token instead.
           git remote set-url origin "https://github.com/$GITHUB_REPOSITORY.git"
           gh auth setup-git
-          git push -u origin "$BRANCH"
-          gh label create agent-built --color 5319E7 --description "Opened by the factory builder agent" --force >/dev/null
-          gh pr create --base "$GITHUB_REF_NAME" --head "$BRANCH" \
-            --title "$ISSUE_IDENTIFIER: $ISSUE_TITLE" --body-file "$body_file" --label agent-built
-          pr_number=$(gh pr view "$BRANCH" --json number -q .number)
+
+          if [ "$EVENT_TYPE" = "factory-build" ]; then
+            git push --force -u origin "$BRANCH"
+            gh label create agent-built --color 5319E7 --description "Opened by the factory builder agent" --force >/dev/null
+            pr_number=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number')
+            {
+              echo "Linear: [$ISSUE_IDENTIFIER]($ISSUE_URL)"
+              echo
+              cat "$body_file"
+            } > "$RUNNER_TEMP/pr_full.md"
+            if [ -n "$pr_number" ]; then
+              gh pr edit "$pr_number" --body-file "$RUNNER_TEMP/pr_full.md"
+            else
+              gh pr create --base "$GITHUB_REF_NAME" --head "$BRANCH" \
+                --title "$ISSUE_IDENTIFIER: $ISSUE_TITLE" --body-file "$RUNNER_TEMP/pr_full.md" --label agent-built
+              pr_number=$(gh pr view "$BRANCH" --json number -q .number)
+            fi
+            linear_comment "$ISSUE_IDENTIFIER" "🏭 Pull request ready: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$pr_number. The reviewer agent is checking it now."
+          else
+            git push origin "$BRANCH"
+            pr_number="$PR_NUMBER"
+            { echo "### 🔧 Builder applied review fixes (round $FIX_ROUND)"; echo; cat "$body_file"; } > "$RUNNER_TEMP/fix_comment.md"
+            gh pr comment "$pr_number" --body-file "$RUNNER_TEMP/fix_comment.md"
+            linear_comment "$ISSUE_IDENTIFIER" "🔧 Builder pushed fixes for round $FIX_ROUND. The reviewer agent is checking again."
+          fi
           echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
-          linear_comment "$ISSUE_ID" "🏭 Pull request opened: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$pr_number. The reviewer agent is checking it now."
 
       - name: Report failure
         if: failure()
         run: |
           [ -f "$RUNNER_TEMP/linear.sh" ] || exit 0
           source "$RUNNER_TEMP/linear.sh"
-          linear_comment "$ISSUE_ID" "💥 The factory build failed. Logs: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          linear_set_state "$ISSUE_ID" "Needs Human"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "$EVENT_TYPE" = "factory-fix" ] && [ -n "$PR_NUMBER" ]; then
+            gh pr comment "$PR_NUMBER" --body "💥 The factory fix run failed. Logs: $run_url" || true
+            gh pr edit "$PR_NUMBER" --add-label needs-human || true
+          fi
+          linear_comment "$ISSUE_IDENTIFIER" "💥 The factory build failed. Logs: $run_url"
+          linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
