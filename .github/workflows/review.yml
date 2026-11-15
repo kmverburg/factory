@@ -107,6 +107,8 @@ jobs:
       - name: Publish verdict
         env:
           GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          # Auto-merge (KOE-14) only runs with the app's token, so the merge starts deploy workflows.
+          FACTORY_APP_TOKEN: ${{ steps.app.outputs.token }}
           IDENTIFIER: ${{ steps.context.outputs.identifier }}
           IS_FOLLOW_UP: ${{ steps.context.outputs.is_follow_up }}
           AGENT_PR: ${{ steps.context.outputs.agent_pr }}
