@@ -32,31 +32,33 @@ Create a repo called `factory` under the same account that owns your app repos, 
 If it's **private**: Settings → Actions → General → Access → choose *Accessible from repositories owned by you*. Otherwise your app repos can't use its workflows.
 
 ### 2. Connect the Worker to this repo
-In Cloudflare: Workers & Pages → `factory-relay` → Settings → Build → Connect, and pick this repo.
+In Cloudflare: Workers & Pages → `factory` → Settings → Build → Connect, and pick this repo.
 - Root directory: `relay`
 - Deploy command: `npx wrangler deploy`
 
-The Worker's name in Cloudflare must be `factory-relay` (or change `name` in `relay/wrangler.jsonc` to match).
+The Worker's name in Cloudflare must match `name` in `relay/wrangler.jsonc` (`factory`).
+
+For PR branches (Settings → Build → Previews Base), the build command is `npm run test --if-present` and the preview command is `npx wrangler deploy --dry-run`: every PR runs the relay tests and checks that it builds, without deploying anything or needing secrets.
 
 Then edit `PROJECT_REPOS` in `relay/wrangler.jsonc`: one line per app, mapping the **exact Linear project name** to `owner/repo`. Every push to `main` redeploys the Worker.
 
 ### 3. Worker secrets
-Worker → Settings → Variables and Secrets → Add, type **Secret**:
-- `LINEAR_API_KEY`: your Linear personal API key
+Don't add these by hand in Cloudflare. Set them in Infisical, folder `/cloudflare/factory-relay` (see [Secrets](#secrets)), and let the sync write them to the `factory` Worker:
+- `LINEAR_API_KEY` (lives in `/shared` and is referenced from this folder)
 - `GITHUB_TOKEN`: a fine-grained GitHub token (github.com → Settings → Developer settings → Fine-grained tokens) with access to your app repos and the permission **Contents: Read and write**
 - `LINEAR_WEBHOOK_SECRET`: from step 4
 
 ### 4. Linear webhook
 Linear → Settings → API → Webhooks → New webhook.
-- URL: your Worker URL (`https://factory-relay.<subdomain>.workers.dev`)
+- URL: the relay's URL (`https://relay.kmverburg.nl`)
 - Events: **Issues**
 
-Copy the signing secret into the Worker as `LINEAR_WEBHOOK_SECRET`. Opening the Worker URL in a browser should show "factory-relay is running".
+Store the signing secret in Infisical as `LINEAR_WEBHOOK_SECRET` (folder `/cloudflare/factory-relay`); don't paste it into Cloudflare. Opening the Worker URL in a browser should show "factory-relay is running".
 
 ### 5. Each app repo
 1. Copy `templates/app-repo/.github/workflows/factory.yml` into the repo (it already points at `kverburg/factory`).
 2. Copy `templates/app-repo/CLAUDE.md` to the repo root and fill it in. Good commands here make both agents much better.
-3. Repo secrets (Settings → Secrets and variables → Actions): `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) and `LINEAR_API_KEY`.
+3. Repo secrets: don't add them by hand. Add the repo as a sync destination for the `/shared` folder in Infisical, so it gets `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), `LINEAR_API_KEY`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. See [Secrets](#secrets).
 4. Settings → Actions → General → Workflow permissions: tick **Allow GitHub Actions to create and approve pull requests**.
 5. Make sure the Claude GitHub App is installed on the repo.
 
@@ -65,6 +67,31 @@ Install Linear's GitHub integration and turn on its pull request automations, so
 
 ### 7. First test
 Create a small, low-risk issue in a mapped project and move it to **Agent Ready**. Within a minute the issue should get a "Picked up by the factory" comment and move to **Agent Working**.
+
+## Secrets
+
+All secrets live in one Infisical project, `factory`, environment `prod`. There is one folder per destination, and each folder is synced to exactly one place. A secret used in several places is stored once in `/shared`. To change or rotate a secret, edit it in Infisical and the sync updates every destination. Never edit secrets directly in GitHub or Cloudflare, as the next sync overwrites them.
+
+| Secret | What it's for | Infisical folder → destination |
+|---|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Lets the agents run Claude | `/shared` → factory, backpack and feast repos |
+| `LINEAR_API_KEY` | Lets the agents and the relay read and update Linear issues | `/shared` → all three repos; referenced by `/cloudflare/factory-relay` |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account for deploys and API calls | `/shared` → all three repos |
+| `CLOUDFLARE_API_TOKEN` | Deploy token for the apps (one token shared by all apps for now) | `/shared` → all three repos |
+| `LINEAR_WEBHOOK_SECRET` | Verifies that webhooks really come from Linear | `/cloudflare/factory-relay` → `factory` Worker |
+| `GITHUB_TOKEN` (relay) | Lets the relay start builds in the app repos | `/cloudflare/factory-relay` → `factory` Worker |
+
+**Planned:** other tickets will add `FACTORY_APP_ID` and `FACTORY_APP_PRIVATE_KEY` ([KOE-13](https://linear.app/koenv/issue/KOE-13/give-the-factory-its-own-github-app-identity)), `CLOUDFLARE_BUILDS_TOKEN` ([KOE-15](https://linear.app/koenv/issue/KOE-15/treat-failing-ci-checks-on-agent-prs-as-something-to-fix)) and `CLOUDFLARE_OBSERVABILITY_TOKEN` ([KOE-17](https://linear.app/koenv/issue/KOE-17/log-scout-turn-app-errors-into-linear-tickets)).
+
+### Local development
+Run the relay with dummy secrets from Infisical's `dev` environment instead of creating `relay/.dev.vars` by hand:
+
+```
+cd relay
+infisical run --env=dev --path=/cloudflare/factory-relay -- npx wrangler dev
+```
+
+The `dev` environment holds dummy values only, never real secrets. `GET /` should answer "factory-relay is running".
 
 ## How decisions are made
 
@@ -83,10 +110,10 @@ The workflows are thin: their logic (prompts, bash scripts, Linear helpers) live
 Issues in the Linear project **Factory** are built and reviewed in this repo, just like an app. Agents can change everything except `.github/` (GitHub doesn't let workflow tokens push workflow files), and the reviewer always escalates changes to the prompts, the verdict logic and the relay's security, since those change how the factory judges itself. Merged changes to `agents/` go live for every app right away.
 
 One-time setup for this repo, the same as step 5 for an app:
-1. Repo secrets `CLAUDE_CODE_OAUTH_TOKEN` and `LINEAR_API_KEY`.
+1. Repo secrets `CLAUDE_CODE_OAUTH_TOKEN` and `LINEAR_API_KEY`, synced from Infisical's `/shared` folder (see [Secrets](#secrets)).
 2. Settings → Actions → General → *Allow GitHub Actions to create and approve pull requests*.
 3. The Claude GitHub App has access to this repo.
-4. The relay's GitHub token (`GITHUB_TOKEN` secret in Cloudflare) includes this repo, with *Contents: Read and write*.
+4. The relay's GitHub token (`GITHUB_TOKEN`, from Infisical's `/cloudflare/factory-relay` folder) includes this repo, with *Contents: Read and write*.
 
 ## Safety notes
 

@@ -1,6 +1,6 @@
 {
   // Must match the Worker's name in the Cloudflare dashboard.
-  "name": "factory-relay",
+  "name": "factory",
   "main": "src/index.ts",
   "compatibility_date": "2025-06-01",
   "observability": { "enabled": true },
