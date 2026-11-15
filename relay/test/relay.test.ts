@@ -226,12 +226,32 @@ describe("problems", () => {
     expect(comments()[0]).toContain("isn't in a Linear project");
   });
 
-  it("sends the issue to Needs Human with a comment when GitHub rejects the build", async () => {
-    githubStatus = 404;
+  it("says the token is invalid or expired when GitHub answers 401", async () => {
+    githubStatus = 401;
     await send(stateChange());
-    expect(githubCalls()).toHaveLength(1);
     expect(stateUpdates()).toEqual(["s-human"]);
     expect(comments()).toHaveLength(1);
-    expect(comments()[0]).toContain("404");
+    expect(comments()[0]).toContain("invalid or expired");
+    expect(comments()[0]).toContain("GITHUB_TOKEN");
+    expect(comments()[0]).toContain("/cloudflare/factory-relay");
+  });
+
+  it.each([403, 404])("says the token can't reach the repo when GitHub answers %i", async (status) => {
+    githubStatus = status;
+    await send(stateChange());
+    expect(stateUpdates()).toEqual(["s-human"]);
+    expect(comments()).toHaveLength(1);
+    expect(comments()[0]).toContain("can't reach that repo");
+    expect(comments()[0]).toContain("Contents: Read and write");
+    expect(comments()[0]).toContain("acme/backpack");
+  });
+
+  it("keeps a general message with the status code for other failures", async () => {
+    githubStatus = 500;
+    await send(stateChange());
+    expect(stateUpdates()).toEqual(["s-human"]);
+    expect(comments()).toHaveLength(1);
+    expect(comments()[0]).toContain("500");
+    expect(comments()[0]).not.toContain("token");
   });
 });
