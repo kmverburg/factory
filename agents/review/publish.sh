@@ -25,6 +25,25 @@ if [ "$decision" = "fix" ]; then
 fi
 risk=$(jq -r '.risk // "unknown"' "$v")
 
+# Auto-merge only for an approved, low-risk PR opened by the factory, unless the repo opted out.
+# merge_note is empty when auto-merge is on, otherwise the reason it isn't.
+auto_merge=false
+merge_note=""
+if [ "$decision" = "approve" ]; then
+  if [ "$risk" != "low" ]; then merge_note="risk is $risk, not low"
+  elif [ "$AGENT_PR" != "true" ]; then merge_note="this PR wasn't opened by the factory"
+  elif grep -qiE '^[[:space:]]*Factory auto-merge:[[:space:]]*off[[:space:]]*$' CLAUDE.md 2>/dev/null; then merge_note="this repo has \`Factory auto-merge: off\` in CLAUDE.md"
+  elif [ -z "$FACTORY_APP_TOKEN" ]; then
+    merge_note="the factory app token isn't available to the reviewer"
+    echo "::warning::FACTORY_APP_TOKEN is not set, so auto-merge was not enabled."
+  elif merge_err=$(GH_TOKEN="$FACTORY_APP_TOKEN" gh pr merge "$PR_NUMBER" --auto --squash --delete-branch 2>&1); then
+    auto_merge=true
+  else
+    merge_note="enabling auto-merge failed: $(printf '%s' "$merge_err" | tr '\n' ' ' | cut -c1-300)"
+    echo "::warning::Enabling auto-merge failed."
+  fi
+fi
+
 # Follow-up tickets (Todo), never from a PR that is itself a follow-up.
 created=""
 if [ -n "$IDENTIFIER" ] && [ "$IS_FOLLOW_UP" != "true" ]; then
@@ -36,7 +55,10 @@ fi
 
 {
   case "$decision" in
-    approve) echo "### ✅ Factory review: approved (risk: $risk)" ;;
+    approve)
+      echo "### ✅ Factory review: approved (risk: $risk)"
+      if [ "$auto_merge" = "true" ]; then echo; echo "Approved, will merge automatically when checks pass."
+      else echo; echo "Approved, but not merging automatically: $merge_note."; fi ;;
     fix) echo "### 🔧 Factory review: sending fixes to the builder (round $((round + 1)) of $MAX_FIX_ROUNDS, risk: $risk)" ;;
     *) echo "### 🙋 Factory review: needs a human (risk: $risk)" ;;
   esac
@@ -65,7 +87,11 @@ case "$decision" in
   approve)
     gh pr edit "$PR_NUMBER" --add-label agent-approved --remove-label needs-human --remove-label agent-fixing
     if [ -n "$IDENTIFIER" ]; then
-      linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Ready to merge.$follow_note"
+      if [ "$auto_merge" = "true" ]; then
+        linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Approved, will merge automatically when checks pass.$follow_note"
+      else
+        linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Not merging automatically: $merge_note. Merge it yourself.$follow_note"
+      fi
       linear_set_state "$IDENTIFIER" "In Review"
     fi
     ;;
