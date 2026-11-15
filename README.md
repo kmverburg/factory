@@ -32,23 +32,25 @@ Create a repo called `factory` under the same account that owns your app repos, 
 If it's **private**: Settings → Actions → General → Access → choose *Accessible from repositories owned by you*. Otherwise your app repos can't use its workflows.
 
 ### 2. Connect the Worker to this repo
-In Cloudflare: Workers & Pages → `factory-relay` → Settings → Build → Connect, and pick this repo.
+In Cloudflare: Workers & Pages → `factory` → Settings → Build → Connect, and pick this repo.
 - Root directory: `relay`
 - Deploy command: `npx wrangler deploy`
 
-The Worker's name in Cloudflare must be `factory-relay` (or change `name` in `relay/wrangler.jsonc` to match).
+The Worker's name in Cloudflare must match `name` in `relay/wrangler.jsonc` (`factory`).
+
+For PR branches (Settings → Build → Previews Base), the build command is `npm run test --if-present` and the preview command is `npx wrangler deploy --dry-run`: every PR runs the relay tests and checks that it builds, without deploying anything or needing secrets.
 
 Then edit `PROJECT_REPOS` in `relay/wrangler.jsonc`: one line per app, mapping the **exact Linear project name** to `owner/repo`. Every push to `main` redeploys the Worker.
 
 ### 3. Worker secrets
-Don't add these by hand in Cloudflare. Set them in Infisical, folder `/cloudflare/factory-relay` (see [Secrets](#secrets)), and let the sync write them to the `factory-relay` Worker:
+Don't add these by hand in Cloudflare. Set them in Infisical, folder `/cloudflare/factory-relay` (see [Secrets](#secrets)), and let the sync write them to the `factory` Worker:
 - `LINEAR_API_KEY` (lives in `/shared` and is referenced from this folder)
 - `GITHUB_TOKEN`: a fine-grained GitHub token (github.com → Settings → Developer settings → Fine-grained tokens) with access to your app repos and the permission **Contents: Read and write**
 - `LINEAR_WEBHOOK_SECRET`: from step 4
 
 ### 4. Linear webhook
 Linear → Settings → API → Webhooks → New webhook.
-- URL: your Worker URL (`https://factory-relay.<subdomain>.workers.dev`)
+- URL: the relay's URL (`https://relay.kmverburg.nl`)
 - Events: **Issues**
 
 Store the signing secret in Infisical as `LINEAR_WEBHOOK_SECRET` (folder `/cloudflare/factory-relay`); don't paste it into Cloudflare. Opening the Worker URL in a browser should show "factory-relay is running".
@@ -76,8 +78,8 @@ All secrets live in one Infisical project, `factory`, environment `prod`. There 
 | `LINEAR_API_KEY` | Lets the agents and the relay read and update Linear issues | `/shared` → all three repos; referenced by `/cloudflare/factory-relay` |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account for deploys and API calls | `/shared` → all three repos |
 | `CLOUDFLARE_API_TOKEN` | Deploy token for the apps (one token shared by all apps for now) | `/shared` → all three repos |
-| `LINEAR_WEBHOOK_SECRET` | Verifies that webhooks really come from Linear | `/cloudflare/factory-relay` → `factory-relay` Worker |
-| `GITHUB_TOKEN` (relay) | Lets the relay start builds in the app repos | `/cloudflare/factory-relay` → `factory-relay` Worker |
+| `LINEAR_WEBHOOK_SECRET` | Verifies that webhooks really come from Linear | `/cloudflare/factory-relay` → `factory` Worker |
+| `GITHUB_TOKEN` (relay) | Lets the relay start builds in the app repos | `/cloudflare/factory-relay` → `factory` Worker |
 
 **Planned:** other tickets will add `FACTORY_APP_ID` and `FACTORY_APP_PRIVATE_KEY` ([KOE-13](https://linear.app/koenv/issue/KOE-13/give-the-factory-its-own-github-app-identity)), `CLOUDFLARE_BUILDS_TOKEN` ([KOE-15](https://linear.app/koenv/issue/KOE-15/treat-failing-ci-checks-on-agent-prs-as-something-to-fix)) and `CLOUDFLARE_OBSERVABILITY_TOKEN` ([KOE-17](https://linear.app/koenv/issue/KOE-17/log-scout-turn-app-errors-into-linear-tickets)).
 
