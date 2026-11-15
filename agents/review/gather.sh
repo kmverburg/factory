@@ -2,6 +2,7 @@
 # Reviewer: collect PR, diff, ticket and follow-up context into .factory-review/. Writes step outputs.
 set -eo pipefail
 source "$FACTORY_DIR/agents/lib/linear.sh"
+source "$FACTORY_DIR/agents/lib/checks.sh"
 mkdir -p .factory-review
 gh pr view "$PR_NUMBER" --json title,body,author,headRefName,baseRefName,additions,deletions,changedFiles,files,labels \
   > .factory-review/pr.json
@@ -34,3 +35,7 @@ fi
 [ "$is_follow_up" = "true" ] && touch .factory-review/no-follow-ups
 echo "identifier=$identifier" >> "$GITHUB_OUTPUT"
 echo "is_follow_up=$is_follow_up" >> "$GITHUB_OUTPUT"
+
+# Other CI checks (not the factory's own jobs): wait for them, then save what failed.
+checks_wait || true
+checks_collect_failed .factory-review/checks || echo "::warning::Couldn't collect check details."
