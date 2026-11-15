@@ -19,6 +19,7 @@ Everything in `agents/` goes live for **all** app repos as soon as it's merged t
 - Relay locally: `cd relay && npx wrangler dev`. Put `LINEAR_WEBHOOK_SECRET=test` (and dummy `LINEAR_API_KEY`, `GITHUB_TOKEN`) in `relay/.dev.vars`, then POST a JSON body with header `linear-signature` set to its HMAC-SHA256 hex digest using that secret (`openssl dgst -sha256 -hmac test`). A `GET /` answers "factory-relay is running".
 - Relay tests: `cd relay && npm ci && npm test` (Vitest, in `relay/test/`). They call the Worker's `fetch` directly and fake Linear and GitHub, so they need no network or Cloudflare login. Run them after any change to `relay/src/`.
 - Scout tests: `bash agents/scout/test.sh` (fixtures in `agents/scout/fixtures/`, no network). Run after any change to `agents/scout/`. Try it on recorded data: `SCOUT_NO_LLM=1 SAMPLE_FILE=agents/scout/fixtures/response.json bash agents/scout/scout.sh --dry-run`.
+- Reviewer tests: `bash agents/review/test.sh` (fake `gh`, no network). Proves a diff touching `.github/` escalates and never auto-merges. Run after any change to `agents/review/`.
 - There are no other tests for `agents/` yet.
 
 ## Log scout
@@ -35,7 +36,7 @@ Once a day (the schedule workflow is added by Koen) `agents/scout/scout.sh` read
 - Keep prompts short and concrete; every rule in a prompt should be checkable.
 
 ## Off-limits
-- `.github/`: agents can't push workflow files, so changes there are done by Koen. If a ticket needs one, write the exact change you need into `.factory/QUESTIONS.md` instead.
+- `.github/`: change workflow files only when the ticket explicitly asks for it, never otherwise. The reviewer always escalates such a PR and it never auto-merges, so Koen approves every workflow change.
 - Weakening the relay's webhook signature or timestamp checks.
 - `relay/wrangler.jsonc` `name`, and anything that would expose secrets.
 

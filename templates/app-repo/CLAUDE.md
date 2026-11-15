@@ -21,6 +21,7 @@ e.g. Next.js 15, TypeScript, Postgres via Prisma, deployed on Cloudflare.
 
 ## Off-limits
 - Files or folders agents must never change (e.g. migrations/, billing/).
+- `.github/`: change workflow files only when the ticket explicitly asks for it, never otherwise. The reviewer always escalates such a PR and it never auto-merges, so a human approves every workflow change.
 
 ## Factory review rules
 Extra reasons for the reviewer to escalate in this repo, e.g.:

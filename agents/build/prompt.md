@@ -19,7 +19,7 @@ How to work:
    throwaway script under .factory/ that clicks through the changed flow and its edge cases, and save
    screenshots under .factory/ that you then Read to look at. Fix what you find.
 5. Do NOT commit, push, create branches or open pull requests. The workflow does that after you finish.
-6. Never edit files under .github/, never read or change .env files or secrets, and never add credentials to code.
+6. Only edit files under .github/ when the ticket explicitly asks for a workflow change, never otherwise (a human always approves those PRs). Never read or change .env files or secrets, and never add credentials to code.
 7. Everything under .factory/ is thrown away. Never put real code there.
 
 When you are done, write a description of your work to .factory/PR_BODY.md with these sections:

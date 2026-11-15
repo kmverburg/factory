@@ -2,6 +2,7 @@
 # Reviewer: post the verdict, label the PR, update Linear, send fix rounds and create follow-ups.
 set -eo pipefail
 source "$FACTORY_DIR/agents/lib/linear.sh"
+source "$FACTORY_DIR/agents/review/workflows.sh"
 v=.factory-review/verdict.json
 pr_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$PR_NUMBER"
 round=${FIX_ROUND:-0}
@@ -23,6 +24,16 @@ if [ "$decision" = "fix" ]; then
     decision=escalate
   fi
 fi
+
+# Any change under .github/ always needs a human, whatever the verdict or risk. Done here in code so the
+# reviewer prompt can't be talked out of it.
+wf_files=$(workflows_changed .factory-review/pr.json .factory-review/diff.patch)
+if [ -n "$wf_files" ] && [ "$decision" != "escalate" ]; then
+  wf_list=$(printf '%s' "$wf_files" | tr '\n' ' ')
+  jq --arg w "This PR changes files under .github/ ($wf_list), which always needs a human to approve." \
+    '.decision = "escalate" | .reasons = ((.reasons // []) + [$w]) | .fix_requests = []' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
+  decision=escalate
+fi
 risk=$(jq -r '.risk // "unknown"' "$v")
 
 # Auto-merge only for an approved, low-risk PR opened by the factory, unless the repo opted out.
@@ -30,7 +41,8 @@ risk=$(jq -r '.risk // "unknown"' "$v")
 auto_merge=false
 merge_note=""
 if [ "$decision" = "approve" ]; then
-  if [ "$risk" != "low" ]; then merge_note="risk is $risk, not low"
+  if [ -n "$wf_files" ]; then merge_note="the PR changes .github/"
+  elif [ "$risk" != "low" ]; then merge_note="risk is $risk, not low"
   elif [ "$AGENT_PR" != "true" ]; then merge_note="this PR wasn't opened by the factory"
   elif grep -qiE '^[[:space:]]*Factory auto-merge:[[:space:]]*off[[:space:]]*$' CLAUDE.md 2>/dev/null; then merge_note="this repo has \`Factory auto-merge: off\` in CLAUDE.md"
   elif [ -z "$FACTORY_APP_TOKEN" ]; then
