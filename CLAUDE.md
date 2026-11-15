@@ -16,7 +16,8 @@ Everything in `agents/` goes live for **all** app repos as soon as it's merged t
 - Relay build check: `cd relay && npx wrangler deploy --dry-run --outdir /tmp/relay-out`
 - Script checks: `bash -n` on every changed script, then `shellcheck -x agents/*.sh agents/*/*.sh`
 - Relay locally: `cd relay && npx wrangler dev`. Put `LINEAR_WEBHOOK_SECRET=test` (and dummy `LINEAR_API_KEY`, `GITHUB_TOKEN`) in `relay/.dev.vars`, then POST a JSON body with header `linear-signature` set to its HMAC-SHA256 hex digest using that secret (`openssl dgst -sha256 -hmac test`). A `GET /` answers "factory-relay is running".
-- There is no test suite yet.
+- Relay tests: `cd relay && npm ci && npm test` (Vitest, in `relay/test/`). They call the Worker's `fetch` directly and fake Linear and GitHub, so they need no network or Cloudflare login. Run them after any change to `relay/src/`.
+- There are no tests for `agents/` yet.
 
 ## Conventions
 - Scripts start with `set -eo pipefail`, read their inputs from environment variables set in the workflow, and write step outputs to `$GITHUB_OUTPUT`.
