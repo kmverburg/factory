@@ -51,7 +51,7 @@ repeat_comment() {
 title_for() { jq -r '"[logs] " + (.message | gsub("[`\\s]+"; " ") | .[0:80])' <<<"$1"; }
 
 scan_app() {
-  local app repo worker raw groups ctx team_id project_id state_id label_id open plan created=0 g body input res
+  local app repo worker raw groups ctx team_id project_id state_id label_id origin_id open plan created=0 g body input res
   app=$(jq -r .project <<<"$1"); repo=$(jq -r .repo <<<"$1"); worker=$(jq -r .worker <<<"$1")
   echo "== $app ($worker)"
   if [ -n "$SAMPLE_FILE" ]; then raw=$(<"$SAMPLE_FILE")
@@ -75,6 +75,8 @@ scan_app() {
   # Triage, or Todo when the team has no triage. Never Agent Ready.
   state_id=$(jq -r '[.team.states.nodes[] | select(.type == "triage")][0].id // ([.team.states.nodes[] | select((.name | ascii_downcase) == "todo")][0].id) // empty' <<<"$ctx")
   label_id=$(linear_ensure_label "$team_id" "$LABEL" "$(jq -c .team.labels.nodes <<<"$ctx")")
+  origin_id=$(linear_group_label_id "$(jq -c .team.labels.nodes <<<"$ctx")" Origin Agent)
+  [ -n "$origin_id" ] || echo "::warning::Label 'Origin › Agent' not found"
   open=$(linear_open_issues_with_label "$team_id" "$project_id" "$LABEL") || open=""
   [ -n "$open" ] || { echo "::warning::Could not list open tickets for $app; skipping to avoid duplicates"; return 0; }
   plan=$(jq -nc --argjson groups "$groups" --argjson open "$open" -f "$here/dedup.jq")
@@ -88,9 +90,9 @@ scan_app() {
   while IFS= read -r g; do
     [ "$created" -lt "$MAX_NEW" ] || { echo "Limit of $MAX_NEW new tickets reached for $app"; break; }
     body=$(ticket_body "$g" "$app" "$repo")
-    input=$(jq -n --arg t "$team_id" --arg p "$project_id" --arg ti "$(title_for "$g")" --arg d "$body" --arg s "$state_id" --arg l "$label_id" \
+    input=$(jq -n --arg t "$team_id" --arg p "$project_id" --arg ti "$(title_for "$g")" --arg d "$body" --arg s "$state_id" --arg l "$label_id" --arg o "$origin_id" \
       '{teamId: $t, projectId: $p, title: $ti, description: $d}
-       + (if $s != "" then {stateId: $s} else {} end) + (if $l != "" then {labelIds: [$l]} else {} end)')
+       + (if $s != "" then {stateId: $s} else {} end) + {labelIds: ([$l, $o] | map(select(. != "")))}')
     res=$(linear_create_issue "$input") || res=""
     if [ -z "$res" ]; then echo "::warning::Could not create a ticket for $(title_for "$g")"; continue; fi
     echo "Created $res"; created=$((created + 1))

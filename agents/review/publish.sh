@@ -93,6 +93,8 @@ case "$decision" in
         linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Not merging automatically: $merge_note. Merge it yourself.$follow_note"
       fi
       linear_set_state "$IDENTIFIER" "In Review"
+      if [ "$auto_merge" = "true" ]; then linear_set_group_label "$IDENTIFIER" Delivery Autonomous
+      else linear_set_group_label "$IDENTIFIER" Delivery "Human involved"; fi
     fi
     ;;
   fix)
@@ -109,6 +111,7 @@ case "$decision" in
     if [ -n "$IDENTIFIER" ]; then
       linear_comment "$IDENTIFIER" "$(printf '🙋 Reviewer agent wants you to look at %s\n\n' "$pr_url"; jq -r '.reasons[]? | "- \(.)"' "$v"; printf '%s' "$follow_note")"
       linear_set_state "$IDENTIFIER" "Needs Human"
+      linear_set_group_label "$IDENTIFIER" Delivery "Human involved"
     fi
     ;;
 esac

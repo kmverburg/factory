@@ -115,6 +115,12 @@ One-time setup for this repo, the same as step 5 for an app:
 3. The Claude GitHub App has access to this repo.
 4. The relay's GitHub token (`GITHUB_TOKEN`, from Infisical's `/cloudflare/factory-relay` folder) includes this repo, with *Contents: Read and write*.
 
+### Linear labels
+
+Two label groups in each Linear team tell you how a ticket came about and how it was delivered. Create them once in Linear (labels with a parent group); the scripts only add them to tickets and warn if one is missing.
+- **Origin** (who had the idea): **Human** is set by the relay on new tickets that have no Origin label. **Agent** is set when the reviewer creates a follow-up ticket and when the log scout creates a ticket (in the same `issueCreate`, so the relay leaves it alone).
+- **Delivery** (did agents do it on their own): **Human involved** is set as soon as a human is needed: the reviewer escalates, the builder asks questions or makes no changes, a build or fix run fails, or the reviewer approves without turning on auto-merge (medium/high risk, repo opted out, PR not opened by the factory, or enabling auto-merge failed). **Autonomous** is set when the reviewer approves and turns on auto-merge. Human involved always wins: it replaces Autonomous, and Autonomous never replaces it. Only one Delivery label is on a ticket, other labels are kept.
+
 ## Log scout
 
 `agents/scout/scout.sh` turns app errors into Linear tickets. For each app in `agents/scout/apps.json` it reads the last 24 hours of errors from Cloudflare Workers Logs (read-only `CLOUDFLARE_OBSERVABILITY_TOKEN` plus `CLOUDFLARE_ACCOUNT_ID`), groups them by signature (message plus top stack frame), and for each new group creates a ticket in the app's Linear project in **Triage** (Todo if the team has none), labelled `source:logs`, never *Agent Ready*. Koen decides what gets built. The ticket has what's happening, count, first/last seen, a sample and the probable code location; Claude writes only that text. If an open `source:logs` ticket already carries the signature, the scout comments with the new count. At most 3 new tickets per app per run. Emails and token-like strings are masked and log text is only shown in code blocks.
