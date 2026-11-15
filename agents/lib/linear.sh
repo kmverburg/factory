@@ -9,7 +9,7 @@ linear_gql() {
 }
 # $1 = issue identifier (KOE-6) or id. Prints the issue as JSON.
 linear_issue() {
-  linear_gql 'query($id: String!) { issue(id: $id) { id identifier title description url project { id } labels { nodes { name } } team { id states { nodes { id name type } } labels { nodes { id name } } } } }' \
+  linear_gql 'query($id: String!) { issue(id: $id) { id identifier title description url state { name type } project { id } labels { nodes { name } } team { id states { nodes { id name type } } labels { nodes { id name } } } } }' \
     "$(jq -n --arg id "$1" '{id: $id}')"
 }
 # $1 = issue, $2 = state name (case-insensitive)
@@ -17,6 +17,10 @@ linear_set_state() {
   local data uuid state_id
   data=$(linear_issue "$1") || { echo "::warning::Linear lookup failed"; return 0; }
   uuid=$(jq -r '.data.issue.id // empty' <<<"$data")
+  # Never reopen a finished issue: a run that ends after the PR was merged must not undo "Done".
+  case "$(jq -r '.data.issue.state.type // empty' <<<"$data")" in
+    completed|canceled) echo "::notice::Linear issue $1 is already $(jq -r '.data.issue.state.name' <<<"$data"); not moving it to '$2'"; return 0 ;;
+  esac
   state_id=$(jq -r --arg n "$2" '.data.issue.team.states.nodes[] | select((.name | ascii_downcase) == ($n | ascii_downcase)) | .id' <<<"$data" | head -n1)
   if [ -z "$uuid" ] || [ -z "$state_id" ]; then echo "::warning::Linear issue $1 or state '$2' not found"; return 0; fi
   linear_gql 'mutation($id: String!, $s: String!) { issueUpdate(id: $id, input: { stateId: $s }) { success } }' \
