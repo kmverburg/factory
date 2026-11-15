@@ -107,7 +107,7 @@ The workflows are thin: their logic (prompts, bash scripts, Linear helpers) live
 
 ## Managing the factory with the factory
 
-Issues in the Linear project **Factory** are built and reviewed in this repo, just like an app. Agents can change everything except `.github/` (GitHub doesn't let workflow tokens push workflow files), and the reviewer always escalates changes to the prompts, the verdict logic and the relay's security, since those change how the factory judges itself. Merged changes to `agents/` go live for every app right away.
+Issues in the Linear project **Factory** are built and reviewed in this repo, just like an app. Agents can change everything, including workflow files in `.github/`, but only when a ticket asks for it. A PR that touches `.github/` is always escalated (enforced in `agents/review/publish.sh`) and never auto-merges, so Koen approves every workflow change. This needs the factory GitHub App to have *Workflows: Read and write*. The reviewer also always escalates changes to the prompts, the verdict logic and the relay's security, since those change how the factory judges itself. Merged changes to `agents/` go live for every app right away.
 
 One-time setup for this repo, the same as step 5 for an app:
 1. Repo secrets `CLAUDE_CODE_OAUTH_TOKEN` and `LINEAR_API_KEY`, synced from Infisical's `/shared` folder (see [Secrets](#secrets)).
@@ -127,7 +127,7 @@ Two label groups in each Linear team tell you how a ticket came about and how it
 
 - **Add an app:** add `{"project": "<exact Linear project name>", "repo": "owner/repo", "worker": "<Worker name>"}` to `agents/scout/apps.json`.
 - **Try it:** `bash agents/scout/scout.sh --dry-run` prints the tickets it would create and doesn't touch Linear. `bash agents/scout/test.sh` runs the tests on recorded data.
-- **Not yet scheduled:** running it daily needs a workflow in `.github/`, which Koen adds.
+- **Not yet scheduled:** running it daily needs a workflow in `.github/`, which a ticket can now ask for (Koen approves it).
 
 ## Safety notes
 

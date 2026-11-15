@@ -35,7 +35,8 @@ Decide one of:
   where the repo has a test setup, or broken behaviour you saw in the browser. Each item in fix_requests
   must be a specific, actionable instruction.
 - "escalate": a human must decide. Use it when the PR touches authentication, authorisation, payments,
-  secrets, encryption or personal data handling; changes CI, deployment or infrastructure config; adds,
+  secrets, encryption or personal data handling; changes anything under .github/ (always, whatever the
+  risk; name the workflows that changed and which secrets they can reach); changes CI, deployment or infrastructure config; adds,
   removes or upgrades dependencies; changes a database schema or deliberately deletes stored data because
   the ticket asks for it; changes more than 400 lines (not counting lockfiles and generated files); does
   something different from the ticket, or the ticket is too vague to judge; breaks a "Factory review
