@@ -16,6 +16,10 @@ on:
         required: true
       LINEAR_API_KEY:
         required: true
+      FACTORY_APP_ID:
+        required: false
+      FACTORY_APP_PRIVATE_KEY:
+        required: false
 
 jobs:
   build:
@@ -42,6 +46,7 @@ jobs:
       PR_NUMBER: ${{ github.event.client_payload.pr_number }}
       FIX_ROUND: ${{ github.event.client_payload.round }}
       FIX_FEEDBACK: ${{ github.event.client_payload.feedback }}
+      HAS_APP: ${{ secrets.FACTORY_APP_ID != '' }}
 
     steps:
       - name: Fetch factory scripts
@@ -62,6 +67,17 @@ jobs:
         continue-on-error: true
         run: bash "$FACTORY_DIR/agents/browser-setup.sh"
 
+      # The factory's GitHub App. Its token is only handed to the Publish step, so Claude never sees it.
+      - name: Factory app identity
+        id: appinfo
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
       - name: Render prompt
         id: prompt
         run: bash "$FACTORY_DIR/agents/lib/render.sh" "$FACTORY_DIR/agents/build/prompt.md" text
@@ -70,16 +86,29 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Fix rounds are started by the workflow bot (factory-fix event), so allow it.
-          allowed_bots: github-actions
+          # Fix rounds are started by the factory app (or the workflow bot without it), so allow those.
+          allowed_bots: github-actions,${{ steps.appinfo.outputs.app-slug }}
           claude_args: >-
             --max-turns 100
             --allowedTools "Read,Write,Edit,MultiEdit,Glob,Grep,Bash"
           prompt: ${{ steps.prompt.outputs.text }}
 
+      # A fresh token (they last an hour) so pushes, PRs and merges count as the app's:
+      # they start CI and deploy workflows, which the built-in workflow token can't.
+      - name: Factory app token
+        id: app
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
       - name: Publish
         id: publish
         env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
           BRANCH: ${{ steps.branch.outputs.name }}
           BASE_SHA: ${{ steps.branch.outputs.base_sha }}
         run: bash "$FACTORY_DIR/agents/build/publish.sh"

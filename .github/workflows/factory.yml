@@ -8,6 +8,7 @@ on:
     # factory-fix:   sent by the reviewer when it wants the builder to fix its PR.
     types: [factory-build, factory-fix]
   # PRs you open yourself get the same review (but are never changed automatically).
+  # The factory's own PRs (label agent-built) are already reviewed by the build run.
   pull_request:
     types: [opened, reopened, ready_for_review]
 
@@ -32,7 +33,8 @@ jobs:
     needs: build
     if: >-
       always() &&
-      ((github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+      ((github.event_name == 'pull_request' && !github.event.pull_request.draft &&
+        !contains(github.event.pull_request.labels.*.name, 'agent-built')) ||
        needs.build.outputs.pr_number != '')
     uses: kverburg/factory/.github/workflows/review.yml@main
     with:

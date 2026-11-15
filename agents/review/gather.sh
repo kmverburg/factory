@@ -8,8 +8,9 @@ gh pr view "$PR_NUMBER" --json title,body,author,headRefName,baseRefName,additio
 base=$(jq -r .baseRefName .factory-review/pr.json)
 git diff "origin/$base...HEAD" > .factory-review/diff.patch
 echo "base=$base" >> "$GITHUB_OUTPUT"
-# Opened by the builder: labelled agent-built and authored by the workflow's bot.
-agent_pr=$(jq -r '([.labels[].name] | index("agent-built") != null) and (.author.login | test("github-actions"))' .factory-review/pr.json)
+# Opened by the builder: labelled agent-built and authored by the factory app or the workflow's bot.
+agent_pr=$(jq -r --arg app "${APP_SLUG:-}" '([.labels[].name] | index("agent-built") != null)
+  and (.author.login as $a | ($a | test("github-actions")) or ($app != "" and ($a == "app/" + $app or $a == $app + "[bot]")))' .factory-review/pr.json)
 echo "agent_pr=$agent_pr" >> "$GITHUB_OUTPUT"
 
 # The previous factory review on this PR, so a fix round can be checked against it.
