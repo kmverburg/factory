@@ -115,6 +115,14 @@ One-time setup for this repo, the same as step 5 for an app:
 3. The Claude GitHub App has access to this repo.
 4. The relay's GitHub token (`GITHUB_TOKEN`, from Infisical's `/cloudflare/factory-relay` folder) includes this repo, with *Contents: Read and write*.
 
+## Log scout
+
+`agents/scout/scout.sh` turns app errors into Linear tickets. For each app in `agents/scout/apps.json` it reads the last 24 hours of errors from Cloudflare Workers Logs (read-only `CLOUDFLARE_OBSERVABILITY_TOKEN` plus `CLOUDFLARE_ACCOUNT_ID`), groups them by signature (message plus top stack frame), and for each new group creates a ticket in the app's Linear project in **Triage** (Todo if the team has none), labelled `source:logs`, never *Agent Ready*. Koen decides what gets built. The ticket has what's happening, count, first/last seen, a sample and the probable code location; Claude writes only that text. If an open `source:logs` ticket already carries the signature, the scout comments with the new count. At most 3 new tickets per app per run. Emails and token-like strings are masked and log text is only shown in code blocks.
+
+- **Add an app:** add `{"project": "<exact Linear project name>", "repo": "owner/repo", "worker": "<Worker name>"}` to `agents/scout/apps.json`.
+- **Try it:** `bash agents/scout/scout.sh --dry-run` prints the tickets it would create and doesn't touch Linear. `bash agents/scout/test.sh` runs the tests on recorded data.
+- **Not yet scheduled:** running it daily needs a workflow in `.github/`, which Koen adds.
+
 ## Safety notes
 
 - Agents never get push access: checkout runs without credentials, and only the workflow's own steps push and open PRs.
