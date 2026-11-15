@@ -10,6 +10,7 @@ if [ "$EVENT_TYPE" = "factory-fix" ] && { [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]] || [[
 fi
 
 source "$FACTORY_DIR/agents/lib/linear.sh"
+source "$FACTORY_DIR/agents/lib/checks.sh"
 mkdir -p .factory
 if [ "$EVENT_TYPE" = "factory-build" ]; then
   slug=$(printf '%s' "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-40 | sed -E 's/-+$//')
@@ -27,6 +28,7 @@ else
     jq -r .body <<<"$pr" > .factory/ticket.md
   fi
   printf '%s\n' "$FIX_FEEDBACK" > .factory/review-feedback.md
+  checks_collect_failed .factory/checks || echo "::warning::Couldn't collect check details."
   linear_set_state "$ISSUE_IDENTIFIER" "Agent Working"
 fi
 echo "name=$branch" >> "$GITHUB_OUTPUT"
