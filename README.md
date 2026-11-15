@@ -38,7 +38,7 @@ In Cloudflare: Workers & Pages → `factory` → Settings → Build → Connect,
 
 The Worker's name in Cloudflare must match `name` in `relay/wrangler.jsonc` (`factory`).
 
-For PR branches (Settings → Build → Previews Base), the build command is `npm run test --if-present` and the preview command is `npx wrangler deploy --dry-run`: every PR runs the relay tests and checks that it builds, without deploying anything or needing secrets.
+PR branches get a Worker Preview (`npx wrangler preview`). Its settings come from the `previews` block in `relay/wrangler.jsonc`: the same state names, no repos and no secrets, so a preview can't start builds or accept webhooks. Never add production secrets to that block or to the Previews Base settings in Cloudflare.
 
 Then edit `PROJECT_REPOS` in `relay/wrangler.jsonc`: one line per app, mapping the **exact Linear project name** to `owner/repo`. Every push to `main` redeploys the Worker.
 
