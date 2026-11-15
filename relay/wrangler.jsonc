@@ -17,9 +17,22 @@
       "Backpack": "kverburg/backpack",
       "Feast": "kverburg/feast"
     }
+  },
+
+  // Worker Previews (PR branches, built by Cloudflare with `npx wrangler preview`).
+  // Previews don't inherit the settings above, so they're repeated here, except that
+  // a preview never starts real builds (no repos) and gets no secrets: without
+  // LINEAR_WEBHOOK_SECRET it rejects every webhook, and only answers GET / as a smoke
+  // test. Never copy production secrets into this block or the Previews Base settings.
+  "previews": {
+    "vars": {
+      "AGENT_READY_STATE": "Agent Ready",
+      "AGENT_WORKING_STATE": "Agent Working",
+      "NEEDS_HUMAN_STATE": "Needs Human",
+      "PROJECT_REPOS": {}
+    }
   }
 
-  // Secrets are NOT stored here. Add them in the dashboard
-  // (Worker -> Settings -> Variables and Secrets, type "Secret"):
-  //   LINEAR_API_KEY, LINEAR_WEBHOOK_SECRET, GITHUB_TOKEN
+  // Secrets are NOT stored here. They come from Infisical (/cloudflare/factory-relay),
+  // synced to the Worker as type "Secret": LINEAR_API_KEY, LINEAR_WEBHOOK_SECRET, GITHUB_TOKEN
 }
