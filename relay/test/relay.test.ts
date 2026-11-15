@@ -28,6 +28,8 @@ interface Call {
 let calls: Call[];
 let issue: any;
 let githubStatus: number;
+let originLabels: { id: string; name: string }[];
+let labelUpdateFails: boolean;
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
@@ -51,6 +53,11 @@ beforeEach(() => {
   calls = [];
   issue = makeIssue();
   githubStatus = 204;
+  originLabels = [
+    { id: "l-human", name: "Human" },
+    { id: "l-agent", name: "Agent" },
+  ];
+  labelUpdateFails = false;
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -60,6 +67,8 @@ beforeEach(() => {
     calls.push({ url, init, body });
     if (url === "https://api.linear.app/graphql") {
       if (body.query.includes("query Issue")) return json({ data: { issue } });
+      if (body.query.includes("OriginLabels")) return json({ data: { issueLabels: { nodes: originLabels } } });
+      if (body.query.includes("AddOrigin") && labelUpdateFails) return json({ errors: [{ message: "boom" }] }, 500);
       return json({ data: { ok: { success: true } } });
     }
     if (url.startsWith("https://api.github.com/")) {
@@ -204,6 +213,56 @@ describe("Agent Ready", () => {
 
   it("handles newly created issues", async () => {
     await send(stateChange({ action: "create", updatedFrom: undefined }));
+    expect(githubCalls()).toHaveLength(1);
+  });
+});
+
+const labelAdds = () =>
+  linearCalls().filter((c) => c.body.query.includes("AddOrigin")).map((c) => c.body.variables);
+
+describe("Origin label", () => {
+  const created = (labelIds?: string[]) =>
+    stateChange({ action: "create", updatedFrom: undefined, data: { id: "issue-1", labelIds } });
+
+  it("adds Origin › Human when no Origin label is present", async () => {
+    issue = makeIssue({ state: { id: "s-working", name: "Todo" } });
+    await send(created(["l-bug"]));
+    expect(labelAdds()).toEqual([{ id: "issue-1", labelId: "l-human" }]);
+  });
+
+  it("adds Origin › Human when the issue has no labels at all", async () => {
+    await send(created(undefined));
+    expect(labelAdds()).toEqual([{ id: "issue-1", labelId: "l-human" }]);
+  });
+
+  it("leaves an issue with Origin › Agent alone", async () => {
+    await send(created(["l-bug", "l-agent"]));
+    expect(labelAdds()).toHaveLength(0);
+  });
+
+  it("leaves an issue with Origin › Human alone", async () => {
+    await send(created(["l-human"]));
+    expect(labelAdds()).toHaveLength(0);
+  });
+
+  it("does not label on updates", async () => {
+    await send(stateChange());
+    expect(linearCalls().some((c) => c.body.query.includes("OriginLabels"))).toBe(false);
+  });
+
+  it("warns and still starts the build when the label update fails", async () => {
+    labelUpdateFails = true;
+    await send(created([]));
+    expect(console.warn).toHaveBeenCalled();
+    expect(githubCalls()).toHaveLength(1);
+    expect(stateUpdates()).toEqual(["s-working"]);
+  });
+
+  it("warns and carries on when the Origin labels can't be found", async () => {
+    originLabels = [];
+    await send(created([]));
+    expect(labelAdds()).toHaveLength(0);
+    expect(console.warn).toHaveBeenCalled();
     expect(githubCalls()).toHaveLength(1);
   });
 });

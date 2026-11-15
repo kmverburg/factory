@@ -68,6 +68,11 @@ export default {
     }
 
     // Answer Linear right away; do the work in the background.
+    if (payload.action === "create") {
+      ctx.waitUntil(
+        labelOrigin(payload.data, env).catch((err) => console.warn("Origin labelling failed", String(err))),
+      );
+    }
     ctx.waitUntil(
       handleIssue(payload.data.id, env).catch((err) => console.error("handleIssue failed", err)),
     );
@@ -147,6 +152,33 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
     `🏭 Picked up by the factory. Building in \`${repo}\`; progress is in [GitHub Actions](https://github.com/${repo}/actions).`,
     env,
   );
+}
+
+/** Gives a new issue Origin › Human unless it already has a label from the Origin group. */
+async function labelOrigin(data: any, env: Env): Promise<void> {
+  const existing: string[] = Array.isArray(data.labelIds) ? data.labelIds : [];
+  const found = await linear<{ issueLabels: { nodes: { id: string; name: string }[] } }>(
+    `query OriginLabels {
+      issueLabels(filter: { parent: { name: { eq: "Origin" } } }) { nodes { id name } }
+    }`,
+    {},
+    env,
+  );
+  const origins = found.issueLabels.nodes;
+  if (origins.some((l) => existing.includes(l.id))) return;
+  const human = origins.find((l) => sameName(l.name, "Human"));
+  if (!human) {
+    console.warn('Label "Origin › Human" not found; leaving the issue unlabelled');
+    return;
+  }
+  await linear(
+    `mutation AddOrigin($id: String!, $labelId: String!) {
+      issueAddLabel(id: $id, labelId: $labelId) { success }
+    }`,
+    { id: data.id, labelId: human.id },
+    env,
+  );
+  console.log(`${data.id}: labelled Origin › Human`);
 }
 
 function dispatchFailureMessage(repo: string, status: number): string {
