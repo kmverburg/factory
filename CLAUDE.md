@@ -5,6 +5,7 @@ The software factory itself. Linear issues in "Agent Ready" go through the relay
 ## Layout
 - `relay/`: Cloudflare Worker (TypeScript) that receives Linear webhooks and starts builds via GitHub `repository_dispatch`. Deploys automatically on push to `main`.
 - `agents/`: the agents' logic. `build/` and `review/` hold the prompts (`prompt.md`, with `{{NAME}}` placeholders filled from environment variables) and the bash scripts each workflow step runs; `lib/linear.sh` has the Linear helpers; `lib/render.sh` fills in prompts.
+- `agents/scout/`: the log scout. `apps.json` lists the apps; `fetch.sh` reads Workers Logs, `group.sh`/`group.jq` mask and group errors, `dedup.jq` matches open tickets, `scout.sh` creates the Linear tickets (`--dry-run` touches nothing). Claude only writes the ticket text (`prompt.md`).
 - `.github/workflows/build.yml` and `review.yml`: thin reusable workflows that every app repo calls. They fetch `agents/` from `main` at run time.
 - `.github/workflows/factory.yml`: this repo's own caller, so the factory can build itself.
 - `templates/`: files to copy into a new app repo.
@@ -17,7 +18,14 @@ Everything in `agents/` goes live for **all** app repos as soon as it's merged t
 - Script checks: `bash -n` on every changed script, then `shellcheck -x agents/*.sh agents/*/*.sh`
 - Relay locally: `cd relay && npx wrangler dev`. Put `LINEAR_WEBHOOK_SECRET=test` (and dummy `LINEAR_API_KEY`, `GITHUB_TOKEN`) in `relay/.dev.vars`, then POST a JSON body with header `linear-signature` set to its HMAC-SHA256 hex digest using that secret (`openssl dgst -sha256 -hmac test`). A `GET /` answers "factory-relay is running".
 - Relay tests: `cd relay && npm ci && npm test` (Vitest, in `relay/test/`). They call the Worker's `fetch` directly and fake Linear and GitHub, so they need no network or Cloudflare login. Run them after any change to `relay/src/`.
-- There are no tests for `agents/` yet.
+- Scout tests: `bash agents/scout/test.sh` (fixtures in `agents/scout/fixtures/`, no network). Run after any change to `agents/scout/`. Try it on recorded data: `SCOUT_NO_LLM=1 SAMPLE_FILE=agents/scout/fixtures/response.json bash agents/scout/scout.sh --dry-run`.
+- There are no other tests for `agents/` yet.
+
+## Log scout
+Once a day (the schedule workflow is added by Koen) `agents/scout/scout.sh` reads each app's last 24 hours of errors from Cloudflare Workers Logs, groups them by signature (message + top stack frame, numbers and ids normalised), and files tickets in the app's Linear project in Triage (Todo if the team has no triage), labelled `source:logs`, never Agent Ready. The signature is in the ticket as `Signature: \`logsig-…\``; an open `source:logs` ticket with the same signature gets a comment instead. Max 3 new tickets per app per run. Log text is untrusted: masked (emails, tokens) and shown only in code blocks.
+- **Add an app:** add `{"project": "<exact Linear project name>", "repo": "owner/repo", "worker": "<Worker name>"}` to `agents/scout/apps.json`. The app must log errors to Workers Logs.
+- Env: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_OBSERVABILITY_TOKEN` (read-only), `LINEAR_API_KEY`; optional `SCOUT_CHECKOUT_DIR` (a checkout per repo, so Claude can find the code).
+- The grouping, masking, dedup and limits are plain code; don't move them into the prompt.
 
 ## Conventions
 - Scripts start with `set -eo pipefail`, read their inputs from environment variables set in the workflow, and write step outputs to `$GITHUB_OUTPUT`.

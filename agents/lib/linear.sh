@@ -77,3 +77,36 @@ linear_create_follow_ups() {
     echo "$created$title"
   done < <(jq -c '.[]' "$2")
 }
+# $1 = project name (case-insensitive). Prints {id, name, team: {id, states, labels}} for its first team, or nothing.
+linear_project_context() {
+  linear_gql 'query($n: String!) { projects(first: 1, filter: { name: { eqIgnoreCase: $n } }) { nodes { id name teams(first: 1) { nodes { id states { nodes { id name type } } labels(first: 250) { nodes { id name } } } } } } }' \
+    "$(jq -n --arg n "$1" '{n: $n}')" \
+    | jq -c '.data.projects.nodes[0] // empty | {id, name, team: .teams.nodes[0]}'
+}
+# $1 = team id, $2 = project id, $3 = label name. Prints open issues with that label as a JSON array [{id, identifier, description}].
+linear_open_issues_with_label() {
+  linear_gql 'query($t: ID!, $p: ID!, $l: String!) { issues(first: 250, filter: { team: { id: { eq: $t } }, project: { id: { eq: $p } }, labels: { some: { name: { eq: $l } } }, state: { type: { nin: ["completed", "canceled"] } } }) { nodes { id identifier description } } }' \
+    "$(jq -n --arg t "$1" --arg p "$2" --arg l "$3" '{t: $t, p: $p, l: $l}')" \
+    | jq -c '.data.issues.nodes'
+}
+# $1 = team id, $2 = label name, $3 = the team's labels as JSON [{id, name}]. Prints the label id, creating the label if needed.
+linear_ensure_label() {
+  local id
+  id=$(jq -r --arg l "$2" '[.[] | select(.name == $l)][0].id // empty' <<<"$3")
+  if [ -z "$id" ]; then
+    id=$(linear_gql 'mutation($n: String!, $t: String!) { issueLabelCreate(input: { name: $n, teamId: $t, color: "#F2994A" }) { issueLabel { id } } }' \
+      "$(jq -n --arg n "$2" --arg t "$1" '{n: $n, t: $t}')" | jq -r '.data.issueLabelCreate.issueLabel.id // empty') || true
+  fi
+  echo "$id"
+}
+# $1 = issue input JSON (IssueCreateInput). Prints "IDENTIFIER url" or nothing. Never moves an issue to Agent Ready: callers choose the state.
+linear_create_issue() {
+  linear_gql 'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { issue { identifier url } } }' \
+    "$(jq -n --argjson i "$1" '{input: $i}')" | jq -r '.data.issueCreate.issue // empty | "\(.identifier) \(.url)"'
+}
+# $1 = issue uuid, $2 = markdown body
+linear_comment_on_id() {
+  linear_gql 'mutation($i: String!, $b: String!) { commentCreate(input: { issueId: $i, body: $b }) { success } }' \
+    "$(jq -n --arg i "$1" --arg b "$2" '{i: $i, b: $b}')" >/dev/null \
+    || echo "::warning::Linear comment failed"
+}
