@@ -133,7 +133,7 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
     console.error(`GitHub dispatch to ${repo} failed`, response.status, detail);
     await addComment(
       issue.id,
-      `🏭 Factory couldn't start a build in \`${repo}\` (GitHub answered ${response.status}). Check that the relay's GitHub token has *Contents: read and write* access to that repo.`,
+      dispatchFailureMessage(repo, response.status),
       env,
     );
     await setState(issue, env.NEEDS_HUMAN_STATE, env);
@@ -147,6 +147,17 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
     `🏭 Picked up by the factory. Building in \`${repo}\`; progress is in [GitHub Actions](https://github.com/${repo}/actions).`,
     env,
   );
+}
+
+function dispatchFailureMessage(repo: string, status: number): string {
+  const prefix = `🏭 Factory couldn't start a build in \`${repo}\`.`;
+  if (status === 401) {
+    return `${prefix} GitHub answered 401: the relay's GitHub token is invalid or expired. Replace \`GITHUB_TOKEN\` in Infisical (\`/cloudflare/factory-relay\`).`;
+  }
+  if (status === 403 || status === 404) {
+    return `${prefix} GitHub answered ${status}: the token works but can't reach that repo. Give it *Contents: Read and write* on \`${repo}\`.`;
+  }
+  return `${prefix} GitHub answered ${status}.`;
 }
 
 // ---------- Name matching (case-insensitive, ignores extra spaces) ----------
