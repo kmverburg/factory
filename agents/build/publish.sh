@@ -13,6 +13,7 @@ if [ -s .factory/QUESTIONS.md ]; then
   fi
   linear_comment "$ISSUE_IDENTIFIER" "$(printf '🤔 The builder agent needs input:\n\n%s\n\nUpdate the ticket, then move it back to **Agent Ready**.' "$questions")"
   linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
+  linear_set_group_label "$ISSUE_IDENTIFIER" Delivery "Human involved"
   exit 0
 fi
 
@@ -36,6 +37,7 @@ if [ "$(git rev-list --count "$BASE_SHA"..HEAD)" = "0" ]; then
   fi
   linear_comment "$ISSUE_IDENTIFIER" "🏭 The builder agent finished without changing any code. Run: $run_url"
   linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
+  linear_set_group_label "$ISSUE_IDENTIFIER" Delivery "Human involved"
   exit 0
 fi
 

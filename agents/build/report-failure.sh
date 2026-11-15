@@ -15,3 +15,4 @@ if [ "$EVENT_TYPE" = "factory-fix" ] && [ -n "$PR_NUMBER" ]; then
 fi
 linear_comment "$ISSUE_IDENTIFIER" "💥 The factory build failed. Logs: $run_url$detail"
 linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
+linear_set_group_label "$ISSUE_IDENTIFIER" Delivery "Human involved"
