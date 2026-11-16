@@ -18,6 +18,10 @@ export interface Env {
   AGENT_READY_STATE: string;
   AGENT_WORKING_STATE: string;
   NEEDS_HUMAN_STATE: string;
+  BLOCKED_STATE: string;
+  TODO_STATE: string;
+  AUTO_START_LABEL: string;
+  MANUAL_LABEL: string;
   PROJECT_REPOS: Record<string, string>;
 }
 
@@ -76,6 +80,11 @@ export default {
     ctx.waitUntil(
       handleIssue(payload.data.id, env).catch((err) => console.error("handleIssue failed", err)),
     );
+    if (payload.action === "update") {
+      ctx.waitUntil(
+        releaseBlocked(payload.data.id, env).catch((err) => console.warn("Releasing blocked tickets failed", String(err))),
+      );
+    }
     return new Response("Accepted", { status: 202 });
   },
 } satisfies ExportedHandler<Env>;
@@ -179,6 +188,89 @@ async function labelOrigin(data: any, env: Env): Promise<void> {
     env,
   );
   console.log(`${data.id}: labelled Origin › Human`);
+}
+
+interface BlockedCandidate {
+  id: string;
+  identifier: string;
+  state: { name: string };
+  labels: { nodes: { name: string }[] };
+  team: { states: { nodes: { id: string; name: string }[] } };
+  inverseRelations: { nodes: { type: string; issue: { identifier: string; state: { type: string } } }[] };
+}
+
+/**
+ * When an issue becomes completed or canceled, looks at the issues it blocks. Those in the
+ * Blocked state whose blockers are all finished move on: to Todo (a blocker was canceled, or
+ * the ticket is `factory:manual` or lacks Auto-start) or to Agent Ready (Auto-start). Moving to
+ * Agent Ready sends its own webhook, which starts the build. Never throws into the build path:
+ * the caller only logs a warning.
+ */
+async function releaseBlocked(issueId: string, env: Env): Promise<void> {
+  const data = await linear<{
+    issue: { identifier: string; state: { type: string }; relations: { nodes: { type: string; relatedIssue: BlockedCandidate }[] } } | null;
+  }>(
+    `query BlockedByThis($id: String!) {
+      issue(id: $id) {
+        identifier
+        state { type }
+        relations {
+          nodes {
+            type
+            relatedIssue {
+              id identifier
+              state { name }
+              labels { nodes { name } }
+              team { states { nodes { id name } } }
+              inverseRelations { nodes { type issue { identifier state { type } } } }
+            }
+          }
+        }
+      }
+    }`,
+    { id: issueId },
+    env,
+  );
+  const done = data.issue;
+  if (!done || (done.state.type !== "completed" && done.state.type !== "canceled")) return;
+
+  for (const rel of done.relations.nodes) {
+    if (rel.type !== "blocks") continue;
+    const blocked = rel.relatedIssue;
+    try {
+      if (!sameName(blocked.state.name, env.BLOCKED_STATE)) continue;
+      const blockers = blocked.inverseRelations.nodes.filter((r) => r.type === "blocks").map((r) => r.issue);
+      if (blockers.some((b) => b.state.type !== "completed" && b.state.type !== "canceled")) continue;
+
+      const labels = blocked.labels.nodes.map((l) => l.name);
+      const hasLabel = (name: string) => labels.some((l) => sameName(l, name));
+      const canceled = blockers.some((b) => b.state.type === "canceled");
+      const toReady = !canceled && hasLabel(env.AUTO_START_LABEL) && !hasLabel(env.MANUAL_LABEL);
+      const target = toReady ? env.AGENT_READY_STATE : env.TODO_STATE;
+
+      const state = blocked.team.states.nodes.find((s) => sameName(s.name, target));
+      if (!state) {
+        console.warn(`Linear state "${target}" not found on the team of ${blocked.identifier}; leaving it in Blocked`);
+        continue;
+      }
+      await linear(
+        `mutation SetState($id: String!, $stateId: String!) {
+          issueUpdate(id: $id, input: { stateId: $stateId }) { success }
+        }`,
+        { id: blocked.id, stateId: state.id },
+        env,
+      );
+      const message = canceled
+        ? `🏭 The plan changed: a ticket blocking this one was canceled (${done.identifier} triggered this check). Moved to ${target} for a human to decide.`
+        : toReady
+          ? `🏭 Unblocked: ${done.identifier} was the last ticket blocking this one. It has **${env.AUTO_START_LABEL}**, so it moved to ${target}.`
+          : `🏭 Unblocked: ${done.identifier} was the last ticket blocking this one. Moved to ${target}.`;
+      await addComment(blocked.id, message, env);
+      console.log(`${blocked.identifier}: unblocked by ${done.identifier}, moved to ${target}`);
+    } catch (err) {
+      console.warn(`Releasing ${blocked.identifier} failed`, String(err));
+    }
+  }
 }
 
 function dispatchFailureMessage(repo: string, status: number): string {
