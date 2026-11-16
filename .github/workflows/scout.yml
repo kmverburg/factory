@@ -1,0 +1,59 @@
+# Log scout: once a day, turns each app's last 24 hours of Worker errors into Linear tickets
+# (agents/scout/). Can also be started by hand; "dry run" only prints what it would create.
+name: Log scout
+
+on:
+  schedule:
+    # 05:00 UTC = 06:00 (winter) / 07:00 (summer) in Europe/Amsterdam.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (only print the tickets it would create, don't touch Linear)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: log-scout
+  cancel-in-progress: false
+
+jobs:
+  scout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check secrets
+        env:
+          CLOUDFLARE_OBSERVABILITY_TOKEN: ${{ secrets.CLOUDFLARE_OBSERVABILITY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          missing=0
+          for name in CLOUDFLARE_OBSERVABILITY_TOKEN CLOUDFLARE_ACCOUNT_ID LINEAR_API_KEY CLAUDE_CODE_OAUTH_TOKEN; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repo secret $name (set it in Infisical, see the README's Secrets section)"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      # scout.sh removes the Cloudflare and Linear values from the environment of the claude process it starts.
+      - name: Run the log scout
+        env:
+          CLOUDFLARE_OBSERVABILITY_TOKEN: ${{ secrets.CLOUDFLARE_OBSERVABILITY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+        run: bash agents/scout/scout.sh
