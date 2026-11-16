@@ -1,0 +1,1011 @@
+{
+"success": true,
+"result": {
+"events": {
+"events": [
+{
+"timestamp": 1760000001000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/100",
+"status": 404,
+"ms": 3000
+}
+},
+{
+"timestamp": 1760000002000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/101",
+"status": 200,
+"ms": 3010
+}
+},
+{
+"timestamp": 1760000003000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/102",
+"status": 200,
+"ms": 3020
+}
+},
+{
+"timestamp": 1760000004000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/103",
+"status": 200,
+"ms": 3030
+}
+},
+{
+"timestamp": 1760000005000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/104",
+"status": 200,
+"ms": 3040
+}
+},
+{
+"timestamp": 1760000006000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/105",
+"status": 200,
+"ms": 3050
+}
+},
+{
+"timestamp": 1760000007000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/106",
+"status": 200,
+"ms": 3060
+}
+},
+{
+"timestamp": 1760000008000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/107",
+"status": 200,
+"ms": 3070
+}
+},
+{
+"timestamp": 1760000009000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/108",
+"status": 200,
+"ms": 3080
+}
+},
+{
+"timestamp": 1760000010000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/109",
+"status": 200,
+"ms": 3090
+}
+},
+{
+"timestamp": 1760000011000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/110",
+"status": 404,
+"ms": 3100
+}
+},
+{
+"timestamp": 1760000012000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/111",
+"status": 200,
+"ms": 3110
+}
+},
+{
+"timestamp": 1760000013000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/112",
+"status": 200,
+"ms": 3120
+}
+},
+{
+"timestamp": 1760000014000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/113",
+"status": 200,
+"ms": 3130
+}
+},
+{
+"timestamp": 1760000015000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/114",
+"status": 200,
+"ms": 3140
+}
+},
+{
+"timestamp": 1760000016000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/115",
+"status": 200,
+"ms": 3150
+}
+},
+{
+"timestamp": 1760000017000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/116",
+"status": 200,
+"ms": 3160
+}
+},
+{
+"timestamp": 1760000018000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/117",
+"status": 200,
+"ms": 3170
+}
+},
+{
+"timestamp": 1760000019000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/118",
+"status": 200,
+"ms": 3180
+}
+},
+{
+"timestamp": 1760000020000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/119",
+"status": 200,
+"ms": 3190
+}
+},
+{
+"timestamp": 1760000021000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/120",
+"status": 404,
+"ms": 3200
+}
+},
+{
+"timestamp": 1760000022000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/121",
+"status": 200,
+"ms": 3210
+}
+},
+{
+"timestamp": 1760000023000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/122",
+"status": 200,
+"ms": 3220
+}
+},
+{
+"timestamp": 1760000024000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/123",
+"status": 200,
+"ms": 3230
+}
+},
+{
+"timestamp": 1760000025000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/124",
+"status": 200,
+"ms": 3240
+}
+},
+{
+"timestamp": 1760000026000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/125",
+"status": 200,
+"ms": 100
+}
+},
+{
+"timestamp": 1760000027000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/126",
+"status": 200,
+"ms": 100
+}
+},
+{
+"timestamp": 1760000028000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/127",
+"status": 200,
+"ms": 100
+}
+},
+{
+"timestamp": 1760000029000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/128",
+"status": 200,
+"ms": 100
+}
+},
+{
+"timestamp": 1760000030000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/trips/129",
+"status": 200,
+"ms": 100
+}
+},
+{
+"timestamp": 1760000031000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000032000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000033000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000034000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000035000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000036000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000037000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000038000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000039000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000040000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000041000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000042000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000043000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000044000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000045000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000046000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000047000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000048000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000049000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000050000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000051000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000052000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000053000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000054000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000055000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "request",
+"route": "/api/ping",
+"status": 200,
+"ms": 20
+}
+},
+{
+"timestamp": 1760000056000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "job_import",
+"ms": 70000,
+"ok": false,
+"host": "example.org"
+}
+},
+{
+"timestamp": 1760000057000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "job_import",
+"ms": 70001,
+"ok": true,
+"host": "example.org"
+}
+},
+{
+"timestamp": 1760000058000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "job_import",
+"ms": 70002,
+"ok": true,
+"host": "example.org"
+}
+},
+{
+"timestamp": 1760000059000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "feedback_proposed",
+"changed": false,
+"text": "can it make a shopping list for jane@example.com?"
+}
+},
+{
+"timestamp": 1760000060000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "feedback_proposed",
+"changed": false,
+"text": "can it make a shopping list for jane@example.com?"
+}
+},
+{
+"timestamp": 1760000061000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "feedback_proposed",
+"changed": true,
+"text": "less salt"
+}
+},
+{
+"timestamp": 1760000062000,
+"$metadata": {
+"level": "log",
+"service": "app"
+},
+"source": {
+"event": "feedback_proposed",
+"changed": false,
+"text": "Please add a shopping list"
+}
+},
+{
+"timestamp": 1760000062000,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 500 ms"
+}
+},
+{
+"timestamp": 1760000062001,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 501 ms"
+}
+},
+{
+"timestamp": 1760000062002,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 502 ms"
+}
+},
+{
+"timestamp": 1760000062003,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 503 ms"
+}
+},
+{
+"timestamp": 1760000062004,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 504 ms"
+}
+},
+{
+"timestamp": 1760000062005,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 505 ms"
+}
+},
+{
+"timestamp": 1760000062006,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 506 ms"
+}
+},
+{
+"timestamp": 1760000062007,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 507 ms"
+}
+},
+{
+"timestamp": 1760000062008,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 508 ms"
+}
+},
+{
+"timestamp": 1760000062009,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 509 ms"
+}
+},
+{
+"timestamp": 1760000062010,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 510 ms"
+}
+},
+{
+"timestamp": 1760000062011,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 511 ms"
+}
+},
+{
+"timestamp": 1760000062012,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 512 ms"
+}
+},
+{
+"timestamp": 1760000062013,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 513 ms"
+}
+},
+{
+"timestamp": 1760000062014,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 514 ms"
+}
+},
+{
+"timestamp": 1760000062015,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 515 ms"
+}
+},
+{
+"timestamp": 1760000062016,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 516 ms"
+}
+},
+{
+"timestamp": 1760000062017,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 517 ms"
+}
+},
+{
+"timestamp": 1760000062018,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 518 ms"
+}
+},
+{
+"timestamp": 1760000062019,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 519 ms"
+}
+},
+{
+"timestamp": 1760000062020,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 520 ms"
+}
+},
+{
+"timestamp": 1760000062021,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 521 ms"
+}
+},
+{
+"timestamp": 1760000062022,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 522 ms"
+}
+},
+{
+"timestamp": 1760000062023,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 523 ms"
+}
+},
+{
+"timestamp": 1760000062024,
+"$metadata": {
+"level": "warn",
+"service": "app",
+"message": "Slow upstream took 524 ms"
+}
+}
+]
+}
+}
+}

@@ -140,3 +140,14 @@ linear_comment_on_id() {
     "$(jq -n --arg i "$1" --arg b "$2" '{i: $i, b: $b}')" >/dev/null \
     || echo "::warning::Linear comment failed"
 }
+# $1 = project id. Prints the project's latest updates as a JSON array [{createdAt, body}] (newest first).
+linear_project_updates() {
+  linear_gql 'query($p: String!) { project(id: $p) { projectUpdates(first: 10) { nodes { createdAt body } } } }' \
+    "$(jq -n --arg p "$1" '{p: $p}')" | jq -c '.data.project.projectUpdates.nodes // empty'
+}
+# $1 = project id, $2 = markdown body, $3 = health (onTrack, atRisk or offTrack). Prints the update url, or nothing.
+linear_project_update_create() {
+  linear_gql 'mutation($p: String!, $b: String!, $h: ProjectUpdateHealthType) { projectUpdateCreate(input: { projectId: $p, body: $b, health: $h }) { projectUpdate { url } } }' \
+    "$(jq -n --arg p "$1" --arg b "$2" --arg h "$3" '{p: $p, b: $b, h: $h}')" \
+    | jq -r '.data.projectUpdateCreate.projectUpdate.url // empty'
+}

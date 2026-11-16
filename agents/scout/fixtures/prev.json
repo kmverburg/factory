@@ -1,0 +1,4 @@
+[{"id": "Slow requests (p95 ms) › /api/trips/N", "value": 1000, "n": 30, "measure": "p95"},
+ {"id": "Slow requests (p95 ms) › /api/ping", "value": 20, "n": 25, "measure": "p95"},
+ {"id": "Warnings › Slow upstream took N ms", "value": 8, "n": 8, "measure": "count"},
+ {"id": "Usage per action › import", "value": 4, "n": 4, "measure": "count"}]
