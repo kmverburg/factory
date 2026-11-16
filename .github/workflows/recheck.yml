@@ -1,0 +1,49 @@
+# Gate for re-reviews (KOE-27). Called from each app repo's factory.yml when a check run
+# fails. Tells the caller whether an agent PR should get another review; the logic lives in
+# agents/review/recheck.sh of the factory repo, fetched at run time from main.
+name: Factory recheck
+
+on:
+  workflow_call:
+    inputs:
+      check_name:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      pr_number:
+        description: Pull request from the check run event (empty if it had none)
+        required: false
+        type: string
+        default: ""
+    outputs:
+      pr_number:
+        description: Pull request to review again (empty if none)
+        value: ${{ jobs.gate.outputs.pr_number }}
+      fix_round:
+        description: Fix rounds this PR already had
+        value: ${{ jobs.gate.outputs.fix_round }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      pr_number: ${{ steps.gate.outputs.pr_number }}
+      fix_round: ${{ steps.gate.outputs.fix_round }}
+    steps:
+      - name: Decide
+        id: gate
+        env:
+          FACTORY_REPO: kverburg/factory
+          GH_TOKEN: ${{ github.token }}
+          CHECK_NAME: ${{ inputs.check_name }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          git clone -q --depth 1 "https://github.com/$FACTORY_REPO.git" "$RUNNER_TEMP/factory"
+          bash "$RUNNER_TEMP/factory/agents/review/recheck.sh"
