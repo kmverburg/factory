@@ -10,6 +10,11 @@
     "AGENT_READY_STATE": "Agent Ready",
     "AGENT_WORKING_STATE": "Agent Working",
     "NEEDS_HUMAN_STATE": "Needs Human",
+    // Blocked tickets are released when their blockers are done (state and label names).
+    "BLOCKED_STATE": "Blocked",
+    "TODO_STATE": "Todo",
+    "AUTO_START_LABEL": "Auto-start",
+    "MANUAL_LABEL": "factory:manual",
 
     // Linear project name -> GitHub repo ("owner/repo"). One line per app.
     "PROJECT_REPOS": {
@@ -29,6 +34,10 @@
       "AGENT_READY_STATE": "Agent Ready",
       "AGENT_WORKING_STATE": "Agent Working",
       "NEEDS_HUMAN_STATE": "Needs Human",
+      "BLOCKED_STATE": "Blocked",
+      "TODO_STATE": "Todo",
+      "AUTO_START_LABEL": "Auto-start",
+      "MANUAL_LABEL": "factory:manual",
       "PROJECT_REPOS": {}
     }
   }

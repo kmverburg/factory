@@ -10,6 +10,10 @@ const env: Env = {
   AGENT_READY_STATE: "Agent Ready",
   AGENT_WORKING_STATE: "Agent Working",
   NEEDS_HUMAN_STATE: "Needs Human",
+  BLOCKED_STATE: "Blocked",
+  TODO_STATE: "Todo",
+  AUTO_START_LABEL: "Auto-start",
+  MANUAL_LABEL: "factory:manual",
   PROJECT_REPOS: { Backpack: "acme/backpack" },
 };
 
@@ -17,6 +21,8 @@ const STATES = [
   { id: "s-ready", name: "Agent Ready" },
   { id: "s-working", name: "Agent Working" },
   { id: "s-human", name: "Needs Human" },
+  { id: "s-todo", name: "Todo" },
+  { id: "s-blocked", name: "Blocked" },
 ];
 
 interface Call {
@@ -30,6 +36,7 @@ let issue: any;
 let githubStatus: number;
 let originLabels: { id: string; name: string }[];
 let labelUpdateFails: boolean;
+let blockerIssue: any;
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
@@ -58,6 +65,7 @@ beforeEach(() => {
     { id: "l-agent", name: "Agent" },
   ];
   labelUpdateFails = false;
+  blockerIssue = null;
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -66,6 +74,7 @@ beforeEach(() => {
     const body = init.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ url, init, body });
     if (url === "https://api.linear.app/graphql") {
+      if (body.query.includes("BlockedByThis")) return json({ data: { issue: blockerIssue } });
       if (body.query.includes("query Issue")) return json({ data: { issue } });
       if (body.query.includes("OriginLabels")) return json({ data: { issueLabels: { nodes: originLabels } } });
       if (body.query.includes("AddOrigin") && labelUpdateFails) return json({ errors: [{ message: "boom" }] }, 500);
@@ -312,5 +321,104 @@ describe("problems", () => {
     expect(comments()).toHaveLength(1);
     expect(comments()[0]).toContain("500");
     expect(comments()[0]).not.toContain("token");
+  });
+});
+
+describe("releasing blocked tickets", () => {
+  const blocker = (identifier: string, type: string) => ({ type: "blocks", issue: { identifier, state: { type } } });
+  const setup = (opts: { type?: string; labels?: string[]; state?: string; blockers?: any[] } = {}) => {
+    blockerIssue = {
+      identifier: "KOE-10",
+      state: { type: opts.type ?? "completed" },
+      relations: {
+        nodes: [
+          {
+            type: "blocks",
+            relatedIssue: {
+              id: "blocked-1",
+              identifier: "KOE-11",
+              state: { name: opts.state ?? "Blocked" },
+              labels: { nodes: (opts.labels ?? []).map((name) => ({ name })) },
+              team: { states: { nodes: STATES } },
+              inverseRelations: { nodes: opts.blockers ?? [blocker("KOE-10", opts.type ?? "completed")] },
+            },
+          },
+        ],
+      },
+    };
+    // The triggering issue itself is not in Agent Ready.
+    issue = makeIssue({ state: { id: "s-working", name: "Done" } });
+  };
+  const moves = () =>
+    linearCalls().filter((c) => c.body.query.includes("SetState")).map((c) => [c.body.variables.id, c.body.variables.stateId]);
+
+  it("moves to Agent Ready with Auto-start and comments which ticket unblocked it", async () => {
+    setup({ labels: ["Auto-start"] });
+    await send(stateChange());
+    expect(moves()).toEqual([["blocked-1", "s-ready"]]);
+    expect(comments()[0]).toContain("KOE-10");
+    expect(githubCalls()).toHaveLength(0); // the resulting webhook starts the build
+  });
+
+  it("moves to Todo without Auto-start", async () => {
+    setup();
+    await send(stateChange());
+    expect(moves()).toEqual([["blocked-1", "s-todo"]]);
+    expect(comments()[0]).toContain("KOE-10");
+  });
+
+  it("matches label names case-insensitively", async () => {
+    setup({ labels: ["AUTO-START"] });
+    await send(stateChange());
+    expect(moves()).toEqual([["blocked-1", "s-ready"]]);
+  });
+
+  it("leaves the ticket in Blocked while another blocker is unfinished", async () => {
+    setup({ labels: ["Auto-start"], blockers: [blocker("KOE-10", "completed"), blocker("KOE-12", "started")] });
+    await send(stateChange());
+    expect(moves()).toEqual([]);
+    expect(comments()).toEqual([]);
+  });
+
+  it("moves to Todo when a blocker was canceled, even with Auto-start", async () => {
+    setup({ type: "canceled", labels: ["Auto-start"] });
+    await send(stateChange());
+    expect(moves()).toEqual([["blocked-1", "s-todo"]]);
+    expect(comments()[0]).toContain("plan changed");
+  });
+
+  it("sends factory:manual tickets to Todo even with Auto-start", async () => {
+    setup({ labels: ["Auto-start", "factory:manual"] });
+    await send(stateChange());
+    expect(moves()).toEqual([["blocked-1", "s-todo"]]);
+  });
+
+  it("leaves tickets that aren't in Blocked alone", async () => {
+    setup({ state: "In Progress", labels: ["Auto-start"] });
+    await send(stateChange());
+    expect(moves()).toEqual([]);
+    expect(comments()).toEqual([]);
+  });
+
+  it("does nothing when the issue isn't completed or canceled", async () => {
+    setup({ type: "started" });
+    await send(stateChange());
+    expect(moves()).toEqual([]);
+  });
+
+  it("warns and still starts builds when Linear fails", async () => {
+    setup();
+    blockerIssue = null;
+    issue = makeIssue();
+    await send(stateChange());
+    expect(githubCalls()).toHaveLength(1);
+  });
+
+  it("warns when the target state doesn't exist", async () => {
+    setup();
+    blockerIssue.relations.nodes[0].relatedIssue.team.states.nodes = [{ id: "s-blocked", name: "Blocked" }];
+    await send(stateChange());
+    expect(moves()).toEqual([]);
+    expect(console.warn).toHaveBeenCalled();
   });
 });

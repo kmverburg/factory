@@ -117,6 +117,15 @@ One-time setup for this repo, the same as step 5 for an app:
 3. The Claude GitHub App has access to this repo.
 4. The relay's GitHub token (`GITHUB_TOKEN`, from Infisical's `/cloudflare/factory-relay` folder) includes this repo, with *Contents: Read and write*.
 
+### Blocked tickets and Auto-start
+
+Tickets that wait on other tickets start by themselves. Put the ticket in the **Blocked** status (add it to the *Unstarted* category in the team's statuses) and mark the others as blocking it with Linear's *blocks* relation. When a blocking ticket reaches a Done (completed) or canceled status, the relay checks every ticket it blocks that is in Blocked. If none of that ticket's blockers is still open, it moves:
+- to **Agent Ready** (which starts a build like a manual move) if it has the **Auto-start** label and not `factory:manual`;
+- to **Todo** otherwise, including every `factory:manual` ticket;
+- to **Todo** with a "plan changed" comment if any of its blockers was canceled, never to Agent Ready.
+
+Each move gets a comment naming the ticket that unblocked it. Tickets with open blockers, or not in Blocked, are left alone. Problems (a status or label not found, Linear errors) are logged as warnings and never stop builds. The names are settings in `relay/wrangler.jsonc` (`BLOCKED_STATE`, `TODO_STATE`, `AUTO_START_LABEL`, `MANUAL_LABEL`). Setting a ticket to Blocked is up to whoever creates it.
+
 ### Linear labels
 
 Two label groups in each Linear team tell you how a ticket came about and how it was delivered. Create them once in Linear (labels with a parent group); the scripts only add them to tickets and warn if one is missing.
