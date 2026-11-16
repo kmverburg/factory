@@ -414,6 +414,35 @@ describe("releasing blocked tickets", () => {
     expect(githubCalls()).toHaveLength(1);
   });
 
+  it("warns with Linear's own error message when releasing fails", async () => {
+    setup();
+    const original = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: any, init: RequestInit = {}) => {
+      const body = init.body ? JSON.parse(String(init.body)) : undefined;
+      if (body?.query?.includes("BlockedByThis")) {
+        return json({ errors: [{ message: "Query too complex" }] }, 400);
+      }
+      return original(input, init);
+    });
+    await send(stateChange());
+    const warned = (console.warn as any).mock.calls.map((c: any[]) => c.join(" ")).join("\n");
+    expect(warned).toContain("Query too complex");
+  });
+
+  it("asks for explicit, small page sizes in every GraphQL query", async () => {
+    // Linear rejects queries over a complexity limit; unpaged connections default to 50 items.
+    setup();
+    await send({ ...stateChange(), action: "create" });
+    await send(stateChange());
+    const queries = linearCalls().map((c) => c.body.query as string);
+    expect(queries.length).toBeGreaterThan(3);
+    for (const q of queries) {
+      const connections = q.match(/\b\w+(\([^)]*\))?\s*\{\s*nodes\b/g) ?? [];
+      for (const c of connections) expect(c, `${c} in ${q}`).toMatch(/\(first:\s*(\d+)\)|\(first:\s*\d+,/);
+      for (const m of q.matchAll(/first:\s*(\d+)/g)) expect(Number(m[1])).toBeLessThanOrEqual(50);
+    }
+  });
+
   it("warns when the target state doesn't exist", async () => {
     setup();
     blockerIssue.relations.nodes[0].relatedIssue.team.states.nodes = [{ id: "s-blocked", name: "Blocked" }];

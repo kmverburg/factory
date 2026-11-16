@@ -168,7 +168,7 @@ async function labelOrigin(data: any, env: Env): Promise<void> {
   const existing: string[] = Array.isArray(data.labelIds) ? data.labelIds : [];
   const found = await linear<{ issueLabels: { nodes: { id: string; name: string }[] } }>(
     `query OriginLabels {
-      issueLabels(filter: { parent: { name: { eq: "Origin" } } }) { nodes { id name } }
+      issueLabels(first: 50, filter: { parent: { name: { eq: "Origin" } } }) { nodes { id name } }
     }`,
     {},
     env,
@@ -214,15 +214,15 @@ async function releaseBlocked(issueId: string, env: Env): Promise<void> {
       issue(id: $id) {
         identifier
         state { type }
-        relations {
+        relations(first: 50) {
           nodes {
             type
             relatedIssue {
               id identifier
               state { name }
-              labels { nodes { name } }
-              team { states { nodes { id name } } }
-              inverseRelations { nodes { type issue { identifier state { type } } } }
+              labels(first: 20) { nodes { name } }
+              team { states(first: 30) { nodes { id name } } }
+              inverseRelations(first: 30) { nodes { type issue { identifier state { type } } } }
             }
           }
         }
@@ -305,7 +305,10 @@ async function linear<T>(query: string, variables: Record<string, unknown>, env:
   });
   const json: any = await res.json();
   if (!res.ok || json.errors) {
-    throw new Error(`Linear API error ${res.status}: ${JSON.stringify(json.errors ?? json)}`);
+    const messages = Array.isArray(json.errors)
+      ? json.errors.map((e: any) => e?.message ?? JSON.stringify(e)).join("; ")
+      : JSON.stringify(json);
+    throw new Error(`Linear API error ${res.status}: ${messages}`);
   }
   return json.data as T;
 }
@@ -317,7 +320,7 @@ async function getIssue(id: string, env: Env): Promise<LinearIssue | null> {
         id identifier title description url
         state { id name }
         project { name }
-        team { states { nodes { id name } } }
+        team { states(first: 30) { nodes { id name } } }
       }
     }`,
     { id },
