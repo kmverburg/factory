@@ -35,14 +35,14 @@ check "dedup: one existing" 1 "$(jq '.existing | length' <<<"$plan")"
 check "dedup: others are new" 3 "$(jq '.new | length' <<<"$plan")"
 
 # Dry run: prints tickets (at most 3), never calls Linear (no key set, curl would fail).
-out=$(env -u LINEAR_API_KEY SCOUT_NO_LLM=1 SAMPLE_FILE="$here/fixtures/response.json" bash "$here/scout.sh" --dry-run)
+out=$(env -u LINEAR_API_KEY SCOUT_APPS="$here/fixtures/apps.json" SCOUT_NO_LLM=1 SAMPLE_FILE="$here/fixtures/response.json" bash "$here/scout.sh" --dry-run)
 check "dry run: at most 3 tickets" 3 "$(grep -c '^--- would create' <<<"$out")"
 check "dry run: signature in ticket" 1 "$(grep -c "Signature: \`$sig\`" <<<"$out")"
 check "dry run: sample is in a code block" 1 "$(grep -c '^### Sample' <<<"$out" | awk '{print ($1 > 0)}')"
 check "dry run: no raw email" 0 "$(grep -c 'example.com' <<<"$out" || true)"
 inj=$(jq -c '{result: {events: {events: [.result.events.events[5]]}}}' "$here/fixtures/response.json")
 inj_file=$(mktemp); echo "$inj" > "$inj_file"
-out=$(env -u LINEAR_API_KEY SCOUT_NO_LLM=1 SAMPLE_FILE="$inj_file" bash "$here/scout.sh" --dry-run); rm -f "$inj_file"
+out=$(env -u LINEAR_API_KEY SCOUT_APPS="$here/fixtures/apps.json" SCOUT_NO_LLM=1 SAMPLE_FILE="$inj_file" bash "$here/scout.sh" --dry-run); rm -f "$inj_file"
 check "dry run: injected text stays inside a code block" 1 "$(awk '/^```/{b=!b} /ignore previous/ && !/^--- would/{print b}' <<<"$out" | head -n1)"
 check "dry run: backticks in logs cannot close the code block" 0 "$(grep -v "^--- would" <<<"$out" | grep -c "Agent Ready \`\`\`" || true)"
 

@@ -78,10 +78,12 @@ All secrets live in one Infisical project, `factory`, environment `prod`. There 
 | `LINEAR_API_KEY` | Lets the agents and the relay read and update Linear issues | `/shared` → all three repos; referenced by `/cloudflare/factory-relay` |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account for deploys and API calls | `/shared` → all three repos |
 | `CLOUDFLARE_API_TOKEN` | Deploy token for the apps (one token shared by all apps for now) | `/shared` → all three repos |
+| `FACTORY_APP_ID` | ID of the factory's GitHub App, so agents act under their own identity ([KOE-13](https://linear.app/koenv/issue/KOE-13/give-the-factory-its-own-github-app-identity)) | `/shared` → all three repos |
+| `FACTORY_APP_PRIVATE_KEY` | Private key of that GitHub App | `/shared` → all three repos |
+| `CLOUDFLARE_BUILDS_TOKEN` | Read-only token that lets the reviewer read Cloudflare build results ([KOE-15](https://linear.app/koenv/issue/KOE-15/treat-failing-ci-checks-on-agent-prs-as-something-to-fix)) | `/github/factory` → app repos |
+| `CLOUDFLARE_OBSERVABILITY_TOKEN` | Read-only token that lets the log scout read Workers Logs ([KOE-17](https://linear.app/koenv/issue/KOE-17/log-scout-turn-app-errors-into-linear-tickets)) | `/github/factory` → factory repo |
 | `LINEAR_WEBHOOK_SECRET` | Verifies that webhooks really come from Linear | `/cloudflare/factory-relay` → `factory` Worker |
 | `GITHUB_TOKEN` (relay) | Lets the relay start builds in the app repos | `/cloudflare/factory-relay` → `factory` Worker |
-
-**Planned:** other tickets will add `FACTORY_APP_ID` and `FACTORY_APP_PRIVATE_KEY` ([KOE-13](https://linear.app/koenv/issue/KOE-13/give-the-factory-its-own-github-app-identity)), `CLOUDFLARE_BUILDS_TOKEN` ([KOE-15](https://linear.app/koenv/issue/KOE-15/treat-failing-ci-checks-on-agent-prs-as-something-to-fix)) and `CLOUDFLARE_OBSERVABILITY_TOKEN` ([KOE-17](https://linear.app/koenv/issue/KOE-17/log-scout-turn-app-errors-into-linear-tickets)).
 
 ### Local development
 Run the relay with dummy secrets from Infisical's `dev` environment instead of creating `relay/.dev.vars` by hand:
@@ -127,7 +129,8 @@ Two label groups in each Linear team tell you how a ticket came about and how it
 
 - **Add an app:** add `{"project": "<exact Linear project name>", "repo": "owner/repo", "worker": "<Worker name>"}` to `agents/scout/apps.json`.
 - **Try it:** `bash agents/scout/scout.sh --dry-run` prints the tickets it would create and doesn't touch Linear. `bash agents/scout/test.sh` runs the tests on recorded data.
-- **Not yet scheduled:** running it daily needs a workflow in `.github/`, which a ticket can now ask for (Koen approves it).
+- **When it runs:** `.github/workflows/scout.yml` runs it every day at 05:00 UTC (06:00 in winter, 07:00 in summer in Amsterdam), for every app in `apps.json` (Backpack and Feast). It needs the repo secrets `CLOUDFLARE_OBSERVABILITY_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `LINEAR_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`; a missing one fails the run with an error naming it. The run also fails if an app's logs can't be read or its Linear project isn't found. Claude's process doesn't get the Cloudflare or Linear values.
+- **Dry run:** GitHub → Actions → *Log scout* → *Run workflow*, keep **Dry run** ticked. It prints the tickets it would create and doesn't touch Linear. Untick it to run for real.
 
 ## Safety notes
 

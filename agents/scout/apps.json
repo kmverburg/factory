@@ -3,5 +3,10 @@
     "project": "Backpack",
     "repo": "kverburg/backpack",
     "worker": "backpack"
+  },
+  {
+    "project": "Feast",
+    "repo": "kverburg/feast",
+    "worker": "feast"
   }
 ]

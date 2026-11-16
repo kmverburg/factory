@@ -12,6 +12,7 @@ source "$here/../lib/linear.sh"
 MAX_NEW=3
 LABEL="source:logs"
 apps_file=${SCOUT_APPS:-$here/apps.json}
+FAILED=0 # set to 1 when an app could not be scanned, so the run ends with an error (after scanning every app)
 
 # $1 = group JSON, $2 = app, $3 = repo. Prints the analysis sections; falls back to plain text.
 write_analysis() {
@@ -20,7 +21,7 @@ write_analysis() {
     prompt=$(<"$here/prompt.md")
     prompt=${prompt//\{\{APP\}\}/$2}; prompt=${prompt//\{\{REPO\}\}/$3}; prompt=${prompt//\{\{GROUP\}\}/$1}
     [ -n "$SCOUT_CHECKOUT_DIR" ] && [ -d "$SCOUT_CHECKOUT_DIR/${3##*/}" ] && repo_dir="$SCOUT_CHECKOUT_DIR/${3##*/}"
-    if out=$(cd "${repo_dir:-.}" && claude -p --max-turns 15 --allowedTools "Read,Grep,Glob" <<<"$prompt" 2>/dev/null) \
+    if out=$(cd "${repo_dir:-.}" && env -u CLOUDFLARE_OBSERVABILITY_TOKEN -u CLOUDFLARE_ACCOUNT_ID -u LINEAR_API_KEY claude -p --max-turns 15 --allowedTools "Read,Grep,Glob" <<<"$prompt" 2>/dev/null) \
       && grep -q "^### What's happening" <<<"$out"; then
       echo "$out"; return 0
     fi
@@ -55,8 +56,8 @@ scan_app() {
   app=$(jq -r .project <<<"$1"); repo=$(jq -r .repo <<<"$1"); worker=$(jq -r .worker <<<"$1")
   echo "== $app ($worker)"
   if [ -n "$SAMPLE_FILE" ]; then raw=$(<"$SAMPLE_FILE")
-  elif ! raw=$(bash "$here/fetch.sh" "$worker"); then echo "::warning::Could not read logs for $app"; return 0; fi
-  groups=$(bash "$here/group.sh" <<<"$raw") || { echo "::warning::Could not parse logs for $app"; return 0; }
+  elif ! raw=$(bash "$here/fetch.sh" "$worker"); then echo "::warning::Could not read logs for $app"; FAILED=1; return 0; fi
+  groups=$(bash "$here/group.sh" <<<"$raw") || { echo "::warning::Could not parse logs for $app"; FAILED=1; return 0; }
   echo "$(jq length <<<"$groups") error group(s)"
   [ "$(jq length <<<"$groups")" -gt 0 ] || return 0
 
@@ -70,7 +71,7 @@ scan_app() {
   fi
 
   ctx=$(linear_project_context "$app") || ctx=""
-  if [ -z "$ctx" ] || [ "$(jq -r '.team.id // empty' <<<"$ctx")" = "" ]; then echo "::warning::Linear project '$app' not found"; return 0; fi
+  if [ -z "$ctx" ] || [ "$(jq -r '.team.id // empty' <<<"$ctx")" = "" ]; then echo "::warning::Linear project '$app' not found"; FAILED=1; return 0; fi
   team_id=$(jq -r .team.id <<<"$ctx"); project_id=$(jq -r .id <<<"$ctx")
   # Triage, or Todo when the team has no triage. Never Agent Ready.
   state_id=$(jq -r '[.team.states.nodes[] | select(.type == "triage")][0].id // ([.team.states.nodes[] | select((.name | ascii_downcase) == "todo")][0].id) // empty' <<<"$ctx")
@@ -78,7 +79,7 @@ scan_app() {
   origin_id=$(linear_group_label_id "$(jq -c .team.labels.nodes <<<"$ctx")" Origin Agent)
   [ -n "$origin_id" ] || echo "::warning::Label 'Origin › Agent' not found"
   open=$(linear_open_issues_with_label "$team_id" "$project_id" "$LABEL") || open=""
-  [ -n "$open" ] || { echo "::warning::Could not list open tickets for $app; skipping to avoid duplicates"; return 0; }
+  [ -n "$open" ] || { echo "::warning::Could not list open tickets for $app; skipping to avoid duplicates"; FAILED=1; return 0; }
   plan=$(jq -nc --argjson groups "$groups" --argjson open "$open" -f "$here/dedup.jq")
 
   while IFS= read -r g; do
@@ -100,5 +101,6 @@ scan_app() {
 }
 
 while IFS= read -r app; do
-  scan_app "$app" || echo "::warning::Scan of $(jq -r .project <<<"$app") failed"
+  scan_app "$app" || { echo "::warning::Scan of $(jq -r .project <<<"$app") failed"; FAILED=1; }
 done < <(jq -c '.[]' "$apps_file")
+[ "$FAILED" = 0 ] || { echo "::error::The log scout could not scan every app (see warnings above)"; exit 1; }
