@@ -8,6 +8,7 @@ The software factory itself. Linear issues in "Agent Ready" go through the relay
 - `agents/scout/`: the log scout. `apps.json` lists the apps; `fetch.sh` reads Workers Logs, `group.sh`/`group.jq` mask and group errors, `dedup.jq` matches open tickets, `scout.sh` creates the Linear tickets (`--dry-run` touches nothing). Claude only writes the ticket text (`prompt.md`).
 - `.github/workflows/build.yml` and `review.yml`: thin reusable workflows that every app repo calls. They fetch `agents/` from `main` at run time.
 - `.github/workflows/factory.yml`: this repo's own caller, so the factory can build itself.
+- `agents/sync/`: `sync-caller.sh` (run by `.github/workflows/sync-caller.yml`) opens "Update factory caller workflow" PRs in every app repo in `PROJECT_REPOS` when the template caller changes. Test: `bash agents/sync/test.sh`.
 - `templates/`: files to copy into a new app repo.
 
 Everything in `agents/` goes live for **all** app repos as soon as it's merged to `main`. A PR's own changes are never used to review that PR.
