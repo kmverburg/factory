@@ -21,6 +21,7 @@ app repo: factory.yml → build.yml (builder agent) → opens PR, issue → "Age
 | `relay/` | Cloudflare Worker that turns Linear webhooks into GitHub builds |
 | `.github/workflows/build.yml` | Reusable builder agent workflow |
 | `.github/workflows/review.yml` | Reusable reviewer agent workflow |
+| `.github/workflows/sync-caller.yml` | Sends caller workflow changes to the app repos |
 | `templates/app-repo/` | The two files every app repo needs |
 | `templates/linear-issue-template.md` | Paste into Linear as your issue template |
 
@@ -106,6 +107,9 @@ The `dev` environment holds dummy values only, never real secrets. `GET /` shoul
 - **Auto-merge**: when the final verdict is approve with risk `low` (also after fix rounds) on a PR the factory opened, the reviewer turns on squash auto-merge with the factory app's token (`FACTORY_APP_TOKEN`), and GitHub merges once the required checks pass. Medium or high risk, fix and escalate verdicts, and PRs not opened by the factory never auto-merge. The repo must allow auto-merge (Settings → General). To opt a repo out, put the line `Factory auto-merge: off` in its `CLAUDE.md`. If auto-merge can't be enabled, the PR keeps `agent-approved` and the Linear comment says why; merge it yourself.
 
 The workflows are thin: their logic (prompts, bash scripts, Linear helpers) lives in `agents/` and is fetched from `main` at run time. See `CLAUDE.md` for the layout.
+
+### How caller changes reach the app repos
+Change the caller workflow once, in `templates/app-repo/.github/workflows/factory.yml` (and this repo's own `.github/workflows/factory.yml` in the same PR). When that template changes on `main`, `.github/workflows/sync-caller.yml` runs `agents/sync/sync-caller.sh` (you can also start it by hand under Actions → *Sync caller workflow*). For every repo in the relay's `PROJECT_REPOS` except this one, it compares the repo's `.github/workflows/factory.yml` with the template, ignoring the leading comment lines, which are repo-specific. If they differ it opens (or updates) one PR titled "Update factory caller workflow" from the branch `factory/sync-caller-workflow`, labelled `factory-sync`, using the factory app's token. Repos that are up to date are left alone, and a failure for one repo doesn't stop the others (the run fails at the end and names them). The PR touches `.github/`, so the reviewer always escalates it and Koen approves it. Test it with `bash agents/sync/test.sh`. The factory app must be installed on every app repo with *Workflows: Read and write* and *Pull requests: Read and write*. Adding an app to `PROJECT_REPOS` includes it in future syncs; the first sync happens on the next template change or manual run.
 
 ## Managing the factory with the factory
 

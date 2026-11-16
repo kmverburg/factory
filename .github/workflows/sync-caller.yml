@@ -1,0 +1,42 @@
+# Sends changes to the caller workflow template to every app repo as a PR ("Update factory caller workflow"),
+# see agents/sync/sync-caller.sh. The app repos are the ones in the relay's PROJECT_REPOS (this repo's own caller
+# is changed directly in the same PR as the template). Can also be started by hand.
+name: Sync caller workflow
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - templates/app-repo/.github/workflows/factory.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-caller
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # No `repositories` filter: one token for every repo the factory app is installed on.
+      - name: Factory app token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Sync app repos
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          FACTORY_REPO: ${{ github.repository }}
+        run: bash agents/sync/sync-caller.sh
