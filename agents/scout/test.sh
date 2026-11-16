@@ -46,4 +46,48 @@ out=$(env -u LINEAR_API_KEY SCOUT_APPS="$here/fixtures/apps.json" SCOUT_NO_LLM=1
 check "dry run: injected text stays inside a code block" 1 "$(awk '/^```/{b=!b} /ignore previous/ && !/^--- would/{print b}' <<<"$out" | head -n1)"
 check "dry run: backticks in logs cannot close the code block" 0 "$(grep -v "^--- would" <<<"$out" | grep -c "Agent Ready \`\`\`" || true)"
 
+# Signals: counting, thresholds, week-over-week, report. Fixture events: 30 slow trip requests (p95 3.2 s, 3 of them 404),
+# 25 fast pings, 3 imports from one host (1 failed), 25 warnings, 3 no-change AI requests (2 about a shopping list).
+ev="$here/fixtures/events.json"
+metric() { jq -n -L "$here" --argjson signal "$1" --argjson events "$(cat "$ev")" -f "$here/metrics.jq" -c; }
+sigs=$(jq -c '.[]' "$here/signals.json")
+slow=$(metric "$(sed -n 1p <<<"$sigs")")
+check "metrics: p95 per route, ids normalised" 3230 "$(jq -s '.[] | select(.group == "/api/trips/N") | .value' <<<"$slow")"
+check "metrics: a second route is its own row" 2 "$(jq -s length <<<"$slow")"
+rate=$(metric "$(sed -n 2p <<<"$sigs")")
+check "metrics: 4xx rate is a share of the route's requests" 0.1 "$(jq -s '.[] | select(.group == "/api/trips/N") | .value' <<<"$rate")"
+imp='{"name":"imp","filters":[{"key":"event","operation":"eq","value":"job_import"}],"where":[{"key":"ok","operation":"eq","value":false}],"by":"host","measure":"count","expect":["never.example"]}'
+check "metrics: boolean where, by host" 1 "$(metric "$imp" | jq -s '.[] | select(.group == "example.org") | .value')"
+check "metrics: expected group with no events reports zero" 0 "$(metric "$imp" | jq -s '.[] | select(.group == "never.example") | .value')"
+check "metrics: events that do not exist report zero" "0 0" "$(metric '{"name":"x","filters":[{"key":"event","operation":"eq","value":"nope"}],"measure":"p95","field":"ms"}' | jq -rs '"\(.[0].value) \(.[0].n)"')"
+M=$(while IFS= read -r s; do metric "$s"; done <<<"$sigs" | jq -s .)
+F=$(jq -n -L "$here" --argjson metrics "$M" --argjson prev null -f "$here/evaluate.jq")
+check "evaluate: thresholds only without last week" "Slow requests (p95 ms) › /api/trips/N|Warnings › Slow upstream took N ms" "$(jq -r 'map(.id) | join("|")' <<<"$F")"
+F2=$(jq -n -L "$here" --argjson metrics "$M" --argjson prev "$(cat "$here/fixtures/prev.json")" -f "$here/evaluate.jq")
+check "evaluate: worse than last week is flagged with the old value" "1000 ms" "$(jq -r '.[] | select(.group == "/api/trips/N") | .previous_display' <<<"$F2")"
+check "evaluate: unchanged signals are not flagged" 0 "$(jq '[.[] | select(.group == "/api/ping")] | length' <<<"$F2")"
+check "evaluate: ticket:false signals are never flagged" 0 "$(jq -n -L "$here" --argjson metrics '[{"id":"u","signal":"u","group":"","ticket":false,"direction":"above","threshold":1,"n":9,"min_count":1,"value":9,"unit":"","floor":1,"worse_pct":50}]' --argjson prev null -f "$here/evaluate.jq" | jq length)"
+report=$(jq -n -L "$here" --argjson metrics "$M" --argjson prev "$(cat "$here/fixtures/prev.json")" --argjson findings "$F2" --arg date 2025-10-13 -f "$here/report.jq")
+check "report: change vs last week in the table" 1 "$(jq -r '.table' <<<"$report" | grep -c '/api/trips/N | 3230 ms | 30 | 1000 ms | +223%' || true)"
+check "report: used last week, not this week" "used last week, not this week" "$(jq -r '.summary.quiet[0].why' <<<"$report")"
+check "report: health follows the number of findings" atRisk "$(jq -r .health <<<"$report")"
+
+# Dry run with signals: numbers, tickets (max 3 in total, errors first), report, no Linear, no raw email.
+run() { env -u LINEAR_API_KEY SCOUT_APPS="$here/fixtures/apps-signals.json" SCOUT_NO_LLM=1 SAMPLE_FILE="$here/fixtures/response.json" SAMPLE_EVENTS_FILE="$ev" "$@" bash "$here/scout.sh" --dry-run; }
+out=$(run SAMPLE_PREV_FILE="$here/fixtures/prev.json")
+check "signals dry run: at most 3 tickets in total" 3 "$(grep -c '^--- would create' <<<"$out")"
+out=$(run SAMPLE_PREV_FILE="$here/fixtures/prev.json" SCOUT_MODE=weekly SCOUT_APPS="$here/fixtures/apps-signals.json")
+check "signals dry run: numbers are shown (in the numbers and in the report)" 2 "$(grep -c '^| Import job duration (p95 ms) | 70002 ms | 3 |' <<<"$out" || true)"
+check "signals dry run: the weekly report is shown" 1 "$(grep -c '^## Weekly health report: Feast' <<<"$out" || true)"
+check "signals dry run: report carries the data for next week" 1 "$(grep -c '^```scout-state' <<<"$out" || true)"
+check "signals dry run: expected but unused action shows" 2 "$(grep -c 'Usage per action › export | 0' <<<"$out" || true)"
+no_err=$(run SAMPLE_FILE=<(echo '{"result":{"events":{"events":[]}}}') SCOUT_MODE=weekly)
+check "signals dry run: a signal over its threshold gets a ticket" 1 "$(grep -c '^--- would create in Triage, label source:logs: \[logs\] Slow requests' <<<"$no_err" || true)"
+check "signals dry run: no-change requests become a theme ticket" 1 "$(grep -c '^--- would create.*Feature request: unsorted requests' <<<"$no_err" || true)"
+check "signals dry run: theme examples are masked" 0 "$(grep -c 'example.com' <<<"$no_err" || true)"
+check "signals dry run: theme examples sit in a code block" 1 "$(awk '/^```/{b=!b} /shopping list/ && !/^--- would/{print b}' <<<"$no_err" | head -n1)"
+daily=$(run SCOUT_MODE=daily SAMPLE_PREV_FILE="$here/fixtures/prev.json")
+check "daily run: no weekly report" 0 "$(grep -c 'Weekly health report' <<<"$daily" || true)"
+check "signals dry run: signatures are stable" "$(grep -o 'logsig-[0-9a-f]*' <<<"$no_err" | sort | tr '\n' ' ')" "$(run SAMPLE_FILE=<(echo '{"result":{"events":{"events":[]}}}') SCOUT_MODE=weekly | grep -o 'logsig-[0-9a-f]*' | sort | tr '\n' ' ')"
+
 exit $fail

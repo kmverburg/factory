@@ -2,11 +2,63 @@
   {
     "project": "Backpack",
     "repo": "kverburg/backpack",
-    "worker": "backpack"
+    "worker": "backpack",
+    "signals": [
+      {"name": "Save conflicts", "filters": [{"key": "event", "operation": "eq", "value": "state_conflict"}],
+       "measure": "count", "threshold": 5},
+      {"name": "Usage per action", "filters": [{"key": "event", "operation": "eq", "value": "action"}],
+       "by": "action", "measure": "count", "ticket": false, "expect": []}
+    ]
   },
   {
     "project": "Feast",
     "repo": "kverburg/feast",
-    "worker": "feast"
+    "worker": "feast",
+    "signals": [
+      {"name": "Import job duration (p95 ms)", "filters": [{"key": "event", "operation": "eq", "value": "job_import"}],
+       "measure": "p95", "field": "ms", "unit": "ms", "threshold": 120000, "min_count": 5, "floor": 30000},
+      {"name": "Translate job duration (p95 ms)", "filters": [{"key": "event", "operation": "eq", "value": "job_translate"}],
+       "measure": "p95", "field": "ms", "unit": "ms", "threshold": 60000, "min_count": 5, "floor": 15000},
+      {"name": "Re-parse job duration (p95 ms)", "filters": [{"key": "event", "operation": "eq", "value": "job_reparse"}],
+       "measure": "p95", "field": "ms", "unit": "ms", "threshold": 60000, "min_count": 5, "floor": 15000},
+      {"name": "Wait for a free LLM slot (p95 ms)", "filters": [{"key": "event", "operation": "eq", "value": "work_waiting"}],
+       "measure": "p95", "field": "waitMs", "unit": "ms", "threshold": 60000, "min_count": 5, "floor": 15000},
+      {"name": "Gemini response time (p95 ms)", "filters": [{"key": "event", "operation": "eq", "value": "gemini_upstream"}],
+       "measure": "p95", "field": "ms", "unit": "ms", "threshold": 30000, "min_count": 5, "floor": 10000},
+      {"name": "Gemini 429s", "filters": [{"key": "event", "operation": "eq", "value": "gemini_upstream"}],
+       "where": [{"key": "status", "operation": "eq", "value": 429}], "measure": "count", "threshold": 5},
+      {"name": "Rejected Gemini keys", "filters": [{"key": "event", "operation": "eq", "value": "gemini_upstream"}],
+       "where": [{"key": "status", "operation": "gte", "value": 401}, {"key": "status", "operation": "lte", "value": 403}],
+       "measure": "count", "threshold": 1},
+      {"name": "Save conflicts (state)", "filters": [{"key": "event", "operation": "eq", "value": "state_conflict"}],
+       "measure": "count", "threshold": 5},
+      {"name": "Save conflicts (sync)", "filters": [{"key": "event", "operation": "eq", "value": "sync_conflict"}],
+       "measure": "count", "threshold": 5},
+      {"name": "AI feedback declined rate", "filters": [{"key": "event", "operation": "eq", "value": "feedback_decided"}],
+       "where": [{"key": "decision", "operation": "eq", "value": "declined"}],
+       "measure": "share", "unit": "rate", "threshold": 0.5, "min_count": 10, "floor": 0.25},
+      {"name": "AI feedback rounds (average)", "filters": [{"key": "event", "operation": "eq", "value": "feedback_decided"}],
+       "measure": "avg", "field": "rounds", "threshold": 3, "min_count": 10, "floor": 2},
+      {"name": "AI feedback proposals that changed nothing", "filters": [{"key": "event", "operation": "eq", "value": "feedback_proposed"}],
+       "where": [{"key": "changed", "operation": "eq", "value": false}], "measure": "count", "ticket": false},
+      {"name": "AI feedback failed", "filters": [{"key": "event", "operation": "eq", "value": "feedback_failed"}],
+       "measure": "count", "threshold": 3},
+      {"name": "AI feedback commented", "filters": [{"key": "event", "operation": "eq", "value": "feedback_commented"}],
+       "measure": "count", "ticket": false},
+      {"name": "Import failures per website", "filters": [{"key": "event", "operation": "eq", "value": "job_import"}],
+       "where": [{"key": "ok", "operation": "eq", "value": false}], "by": "host", "measure": "count", "threshold": 3},
+      {"name": "Re-parses", "filters": [{"key": "event", "operation": "eq", "value": "job_reparse"}],
+       "measure": "count", "threshold": 20},
+      {"name": "Bad LLM output", "filters": [{"key": "event", "operation": "eq", "value": "work_bad_output"}],
+       "measure": "count", "threshold": 5},
+      {"name": "Requests per app version", "filters": [{"key": "event", "operation": "eq", "value": "request"}],
+       "by": "version", "measure": "count", "ticket": false}
+    ],
+    "themes": [
+      {"name": "AI feedback requests that changed nothing",
+       "filters": [{"key": "event", "operation": "eq", "value": "feedback_proposed"}],
+       "where": [{"key": "changed", "operation": "eq", "value": false}],
+       "text_field": "text", "min_count": 3}
+    ]
   }
 ]

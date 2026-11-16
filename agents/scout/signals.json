@@ -1,0 +1,14 @@
+[
+  {"name": "Slow requests (p95 ms)", "filters": [{"key": "event", "operation": "eq", "value": "request"}],
+   "by": "route", "measure": "p95", "field": "ms", "unit": "ms", "threshold": 2000, "min_count": 20, "floor": 500},
+  {"name": "4xx rate", "filters": [{"key": "event", "operation": "eq", "value": "request"}],
+   "where": [{"key": "status", "operation": "gte", "value": 400}, {"key": "status", "operation": "lt", "value": 500}],
+   "by": "route", "measure": "share", "unit": "rate", "threshold": 0.2, "min_count": 20, "floor": 0.05},
+  {"name": "5xx rate", "filters": [{"key": "event", "operation": "eq", "value": "request"}],
+   "where": [{"key": "status", "operation": "gte", "value": 500}, {"key": "status", "operation": "lt", "value": 600}],
+   "by": "route", "measure": "share", "unit": "rate", "threshold": 0.02, "min_count": 20, "floor": 0.01},
+  {"name": "Warnings", "filters": [{"key": "$metadata.level", "operation": "eq", "value": "warn"}],
+   "by": "message", "measure": "count", "threshold": 20, "floor": 10},
+  {"name": "Errors", "filters": [{"key": "$metadata.level", "operation": "eq", "value": "error"}],
+   "measure": "count", "ticket": false}
+]

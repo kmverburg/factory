@@ -1,0 +1,16 @@
+[
+  {"project": "Feast", "repo": "kverburg/feast", "worker": "feast",
+   "signals": [
+     {"name": "Import failures per website", "filters": [{"key": "event", "operation": "eq", "value": "job_import"}],
+      "where": [{"key": "ok", "operation": "eq", "value": false}], "by": "host", "measure": "count", "threshold": 1},
+     {"name": "Import job duration (p95 ms)", "filters": [{"key": "event", "operation": "eq", "value": "job_import"}],
+      "measure": "p95", "field": "ms", "unit": "ms", "threshold": 120000, "min_count": 2},
+     {"name": "Usage per action", "filters": [{"key": "event", "operation": "eq", "value": "action"}],
+      "by": "action", "measure": "count", "ticket": false, "expect": ["export"]},
+     {"name": "Save conflicts", "filters": [{"key": "event", "operation": "eq", "value": "state_conflict"}],
+      "measure": "count", "threshold": 5}
+   ],
+   "themes": [{"name": "AI feedback requests that changed nothing",
+     "filters": [{"key": "event", "operation": "eq", "value": "feedback_proposed"}],
+     "where": [{"key": "changed", "operation": "eq", "value": false}], "text_field": "text", "min_count": 2}]}
+]
