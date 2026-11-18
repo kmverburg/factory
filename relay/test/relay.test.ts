@@ -14,7 +14,8 @@ const env: Env = {
   TODO_STATE: "Todo",
   AUTO_START_LABEL: "Auto-start",
   MANUAL_LABEL: "factory:manual",
-  PROJECT_REPOS: { Backpack: "acme/backpack" },
+  GITHUB_OWNER: "acme",
+  PROJECT_REPOS: { Backpack: "acme/backpack", Feast: "feast" },
 };
 
 const STATES = [
@@ -34,6 +35,7 @@ interface Call {
 let calls: Call[];
 let issue: any;
 let githubStatus: number;
+let githubRedirects: Record<string, { status: number; location: string }>;
 let originLabels: { id: string; name: string }[];
 let labelUpdateFails: boolean;
 let blockerIssue: any;
@@ -60,6 +62,7 @@ beforeEach(() => {
   calls = [];
   issue = makeIssue();
   githubStatus = 204;
+  githubRedirects = {};
   originLabels = [
     { id: "l-human", name: "Human" },
     { id: "l-agent", name: "Agent" },
@@ -81,6 +84,8 @@ beforeEach(() => {
       return json({ data: { ok: { success: true } } });
     }
     if (url.startsWith("https://api.github.com/")) {
+      const redirect = githubRedirects[url];
+      if (redirect) return new Response(null, { status: redirect.status, headers: { Location: redirect.location } });
       return new Response(githubStatus === 204 ? null : "nope", { status: githubStatus });
     }
     throw new Error(`Unexpected network call to ${url}`);
@@ -228,6 +233,58 @@ describe("Agent Ready", () => {
 
 const labelAdds = () =>
   linearCalls().filter((c) => c.body.query.includes("AddOrigin")).map((c) => c.body.variables);
+
+describe("repo names", () => {
+  it("uses GITHUB_OWNER for a bare repo name", async () => {
+    issue = makeIssue({ project: { name: "Feast" } });
+    await send(stateChange());
+    expect(githubCalls().map((c) => c.url)).toEqual(["https://api.github.com/repos/acme/feast/dispatches"]);
+  });
+
+  it("keeps an owner/repo value as it is", async () => {
+    await send(stateChange());
+    expect(githubCalls().map((c) => c.url)).toEqual(["https://api.github.com/repos/acme/backpack/dispatches"]);
+  });
+});
+
+describe("moved repos", () => {
+  const from = "https://api.github.com/repos/acme/backpack/dispatches";
+  const to = "https://api.github.com/repositories/42/dispatches";
+
+  it.each([301, 307, 308])("sends the same POST once to the new location on a %i", async (status) => {
+    githubRedirects[from] = { status, location: to };
+    await send(stateChange());
+    const gh = githubCalls();
+    expect(gh.map((c) => c.url)).toEqual([from, to]);
+    expect(gh[1].init.method).toBe("POST");
+    expect(gh[1].body).toEqual(gh[0].body);
+    expect((gh[1].init.headers as Record<string, string>).Authorization).toBe("Bearer gh-token");
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("has moved"));
+    expect(stateUpdates()).toEqual(["s-working"]);
+  });
+
+  it("follows only one redirect", async () => {
+    githubRedirects[from] = { status: 301, location: to };
+    githubRedirects[to] = { status: 301, location: "https://api.github.com/repositories/43/dispatches" };
+    await send(stateChange());
+    expect(githubCalls().map((c) => c.url)).toEqual([from, to]);
+    expect(stateUpdates()).toEqual(["s-human"]);
+  });
+
+  it("doesn't send the token to another host", async () => {
+    githubRedirects[from] = { status: 301, location: "https://evil.example/x" };
+    await send(stateChange());
+    expect(calls.map((c) => c.url)).not.toContain("https://evil.example/x");
+    expect(stateUpdates()).toEqual(["s-human"]);
+  });
+
+  it("treats a redirect without Location as a failure", async () => {
+    githubStatus = 301;
+    await send(stateChange());
+    expect(githubCalls()).toHaveLength(1);
+    expect(stateUpdates()).toEqual(["s-human"]);
+  });
+});
 
 describe("Origin label", () => {
   const created = (labelIds?: string[]) =>

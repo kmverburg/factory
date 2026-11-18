@@ -39,7 +39,7 @@ jobs:
       - name: Decide
         id: gate
         env:
-          FACTORY_REPO: kverburg/factory
+          FACTORY_REPO: ${{ github.repository_owner }}/factory
           GH_TOKEN: ${{ github.token }}
           CHECK_NAME: ${{ inputs.check_name }}
           HEAD_SHA: ${{ inputs.head_sha }}

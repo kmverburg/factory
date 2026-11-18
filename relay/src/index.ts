@@ -22,6 +22,9 @@ export interface Env {
   TODO_STATE: string;
   AUTO_START_LABEL: string;
   MANUAL_LABEL: string;
+  // GitHub user or organization that owns the repos. Used for PROJECT_REPOS values that are just a repo name.
+  GITHUB_OWNER: string;
+  // Linear project name -> repo name ("backpack") or "owner/repo".
   PROJECT_REPOS: Record<string, string>;
 }
 
@@ -108,7 +111,8 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
   }
 
   const projectName = issue.project?.name;
-  const repo = projectName ? findRepo(projectName, env.PROJECT_REPOS) : undefined;
+  const mapped = projectName ? findRepo(projectName, env.PROJECT_REPOS) : undefined;
+  const repo = mapped ? fullRepoName(mapped, env.GITHUB_OWNER) : undefined;
   console.log(`${issue.identifier}: project "${projectName ?? "(none)"}" -> repo ${repo ?? "(none)"}`);
 
   if (!repo) {
@@ -121,26 +125,16 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
   }
 
   const description = (issue.description ?? "").slice(0, MAX_DESCRIPTION_CHARS);
-  const response = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "factory-relay",
-      "Content-Type": "application/json",
+  const response = await dispatchBuild(repo, {
+    event_type: "factory-build",
+    client_payload: {
+      issue_id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      description,
+      url: issue.url,
     },
-    body: JSON.stringify({
-      event_type: "factory-build",
-      client_payload: {
-        issue_id: issue.id,
-        identifier: issue.identifier,
-        title: issue.title,
-        description,
-        url: issue.url,
-      },
-    }),
-  });
+  }, env);
 
   if (!response.ok) {
     const detail = await response.text();
@@ -161,6 +155,43 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
     `🏭 Picked up by the factory. Building in \`${repo}\`; progress is in [GitHub Actions](https://github.com/${repo}/actions).`,
     env,
   );
+}
+
+/**
+ * Sends the repository_dispatch. GitHub answers 301/307/308 with a Location for a moved repo;
+ * fetch would turn a redirected POST into a GET, so follow it by hand, once, with the same POST.
+ */
+async function dispatchBuild(repo: string, payload: unknown, env: Env): Promise<Response> {
+  const init: RequestInit = {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "factory-relay",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  };
+  const url = `https://api.github.com/repos/${repo}/dispatches`;
+  const response = await fetch(url, init);
+  const location = response.headers.get("Location");
+  if (![301, 307, 308].includes(response.status) || !location) return response;
+
+  let target: URL;
+  try {
+    target = new URL(location, url);
+  } catch {
+    return response;
+  }
+  // The token only goes to GitHub's API.
+  if (target.protocol !== "https:" || target.hostname !== "api.github.com") {
+    console.warn(`GitHub redirected ${repo} to an unexpected location; not following it`);
+    return response;
+  }
+  console.warn(`Repo ${repo} has moved (GitHub answered ${response.status}); retrying at ${target.pathname}. Update PROJECT_REPOS / GITHUB_OWNER.`);
+  return fetch(target.toString(), init);
 }
 
 /** Gives a new issue Origin › Human unless it already has a label from the Origin group. */
@@ -288,6 +319,12 @@ function dispatchFailureMessage(repo: string, status: number): string {
 
 function sameName(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/** "backpack" becomes "<owner>/backpack"; "owner/backpack" is left alone. */
+function fullRepoName(repo: string, owner: string): string {
+  const name = repo.trim();
+  return name.includes("/") || !owner ? name : `${owner.trim()}/${name}`;
 }
 
 function findRepo(projectName: string, repos: Record<string, string>): string | undefined {

@@ -25,7 +25,7 @@ Everything in `agents/` goes live for **all** app repos as soon as it's merged t
 
 ## Log scout
 Once a day (the schedule workflow is added by Koen) `agents/scout/scout.sh` reads each app's last 24 hours of errors from Cloudflare Workers Logs, groups them by signature (message + top stack frame, numbers and ids normalised), and files tickets in the app's Linear project in Triage (Todo if the team has no triage), labelled `source:logs`, never Agent Ready. The signature is in the ticket as `Signature: \`logsig-…\``; an open `source:logs` ticket with the same signature gets a comment instead. Max 3 new tickets per app per run. Log text is untrusted: masked (emails, tokens) and shown only in code blocks.
-- **Add an app:** add `{"project": "<exact Linear project name>", "repo": "owner/repo", "worker": "<Worker name>"}` to `agents/scout/apps.json`. The app must log errors to Workers Logs.
+- **Add an app:** add `{"project": "<exact Linear project name>", "repo": "<repo name, no owner>", "worker": "<Worker name>"}` to `agents/scout/apps.json`. The app must log errors to Workers Logs.
 - Env: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_OBSERVABILITY_TOKEN` (read-only), `LINEAR_API_KEY`; optional `SCOUT_CHECKOUT_DIR` (a checkout per repo, so Claude can find the code).
 - The grouping, masking, counting, thresholds, comparisons, dedup and limits are plain code; don't move them into the prompt. Signals, how to add one and the weekly report are described in the README's Log scout section.
 

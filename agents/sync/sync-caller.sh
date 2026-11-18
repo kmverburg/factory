@@ -22,10 +22,13 @@ header() { awk '/^#/ { print; next } { exit }' "$1"; }
 body() { awk 'f || !/^#/ { f = 1; print }' "$1"; }
 
 # Repos from the first PROJECT_REPOS block of the relay config (JSONC, so no jq), minus the factory itself.
+# Values may be "repo" (the factory's owner is assumed) or "owner/repo".
 repos() {
   awk '/"PROJECT_REPOS"/ { on = 1 } on { print } on && /}/ { exit }' "$config" \
-    | grep -oE '"[^"]+"[[:space:]]*:[[:space:]]*"[^"/]+/[^"/]+"' \
-    | sed -E 's/.*:[[:space:]]*"([^"]+)"$/\1/' | grep -vxF "$FACTORY_REPO" | sort -u || true
+    | grep -oE '"[^"]+"[[:space:]]*:[[:space:]]*"[^"/]+(/[^"/]+)?"' \
+    | sed -E 's/.*:[[:space:]]*"([^"]+)"$/\1/' \
+    | awk -v owner="${FACTORY_REPO%%/*}" '{ print (index($0, "/") ? $0 : owner "/" $0) }' \
+    | grep -vxF "$FACTORY_REPO" | sort -u || true
 }
 
 sync_repo() {
