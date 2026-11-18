@@ -1,5 +1,5 @@
 [
-  {"project": "Feast", "repo": "kverburg/feast", "worker": "feast",
+  {"project": "Feast", "repo": "feast", "worker": "feast",
    "signals": [
      {"name": "Import failures per website", "filters": [{"key": "event", "operation": "eq", "value": "job_import"}],
       "where": [{"key": "ok", "operation": "eq", "value": false}], "by": "host", "measure": "count", "threshold": 1},

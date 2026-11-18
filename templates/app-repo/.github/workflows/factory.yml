@@ -1,5 +1,6 @@
 # Copy this file into each app repo as .github/workflows/factory.yml.
-# It already points at kverburg/factory.
+# It names the factory repo's owner in the three `uses:` lines (GitHub needs a literal name there);
+# change it there if the factory moves (README: "Changing the GitHub owner").
 name: Factory
 
 on:

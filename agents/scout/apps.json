@@ -1,7 +1,7 @@
 [
   {
     "project": "Backpack",
-    "repo": "kverburg/backpack",
+    "repo": "backpack",
     "worker": "backpack",
     "signals": [
       {"name": "Save conflicts", "filters": [{"key": "event", "operation": "eq", "value": "state_conflict"}],
@@ -12,7 +12,7 @@
   },
   {
     "project": "Feast",
-    "repo": "kverburg/feast",
+    "repo": "feast",
     "worker": "feast",
     "signals": [
       {"name": "Import job duration (p95 ms)", "filters": [{"key": "event", "operation": "eq", "value": "job_import"}],

@@ -2,7 +2,8 @@
 # Log scout: reads each app's Worker logs and turns what it finds into Linear tickets (Triage, never Agent Ready)
 # and, on Mondays, a weekly health report (Linear project update).
 # Usage: scout.sh [--dry-run]   (or DRY_RUN=1)
-# Env: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_OBSERVABILITY_TOKEN, LINEAR_API_KEY.
+# Env: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_OBSERVABILITY_TOKEN, LINEAR_API_KEY, GITHUB_OWNER (owner of the repos in apps.json,
+#      which name them without an owner; the workflow sets it from github.repository_owner).
 # Optional: SCOUT_CHECKOUT_DIR (directory holding a checkout per app repo, e.g. $DIR/backpack, so Claude can find code),
 #           SCOUT_NO_LLM=1 (plain text instead of Claude's), SCOUT_APPS (apps file, default apps.json next to this script),
 #           SCOUT_MODE=daily|weekly (default: weekly on Mondays (UTC) and in dry runs, daily otherwise),
@@ -112,6 +113,7 @@ events_for() {
 collect_metrics() {
   local worker s ev rows="[]"
   worker=$(jq -r .worker <<<"$1")
+  case "$repo" in */*) ;; *) [ -n "$GITHUB_OWNER" ] && repo="$GITHUB_OWNER/$repo" ;; esac
   while IFS= read -r s; do
     if ! ev=$(events_for "$worker" "$(jq -c '.filters // []' <<<"$s")" "$WINDOW_HOURS"); then
       echo "::warning::Could not read '$(jq -r .name <<<"$s")' for $worker" >&2; FAILED=1; continue

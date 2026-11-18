@@ -41,7 +41,7 @@ The Worker's name in Cloudflare must match `name` in `relay/wrangler.jsonc` (`fa
 
 PR branches get a Worker Preview (`npx wrangler preview`). Its settings come from the `previews` block in `relay/wrangler.jsonc`: the same state names, no repos and no secrets, so a preview can't start builds or accept webhooks. Never add production secrets to that block or to the Previews Base settings in Cloudflare.
 
-Then edit `PROJECT_REPOS` in `relay/wrangler.jsonc`: one line per app, mapping the **exact Linear project name** to `owner/repo`. Every push to `main` redeploys the Worker.
+Then edit `PROJECT_REPOS` in `relay/wrangler.jsonc`: one line per app, mapping the **exact Linear project name** to the repo name (`backpack`; `owner/repo` also works). The owner comes from `GITHUB_OWNER` in the same file (also set in the `previews` block). Every push to `main` redeploys the Worker.
 
 ### 3. Worker secrets
 Don't add these by hand in Cloudflare. Set them in Infisical, folder `/cloudflare/factory-relay` (see [Secrets](#secrets)), and let the sync write them to the `factory` Worker:
@@ -57,7 +57,7 @@ Linear → Settings → API → Webhooks → New webhook.
 Store the signing secret in Infisical as `LINEAR_WEBHOOK_SECRET` (folder `/cloudflare/factory-relay`); don't paste it into Cloudflare. Opening the Worker URL in a browser should show "factory-relay is running".
 
 ### 5. Each app repo
-1. Copy `templates/app-repo/.github/workflows/factory.yml` into the repo (it already points at `kverburg/factory`).
+1. Copy `templates/app-repo/.github/workflows/factory.yml` into the repo (it already points at `kverburg/factory`; see [Changing the GitHub owner](#changing-the-github-owner)).
 2. Copy `templates/app-repo/CLAUDE.md` to the repo root and fill it in. Good commands here make both agents much better.
 3. Repo secrets: don't add them by hand. Add the repo as a sync destination for the `/shared` folder in Infisical, so it gets `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), `LINEAR_API_KEY`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. See [Secrets](#secrets).
 4. Settings → Actions → General → Workflow permissions: tick **Allow GitHub Actions to create and approve pull requests**.
@@ -147,13 +147,21 @@ Two label groups in each Linear team tell you how a ticket came about and how it
 - **Themes:** Feast's no-change AI feedback requests (`themes` in `apps.json`) are grouped by Claude into themes ("shopping list"); each theme with at least 2 requests becomes one feature-request ticket, deduplicated by theme name. The scout validates Claude's grouping; without Claude it files one "unsorted requests" ticket.
 - **Weekly report:** the Monday run posts a project update with the main numbers, what changed since last week, what is over a threshold, signals that saw no events, and Claude's short "what changed" and "suggestions" sections. Health is `onTrack` (nothing to act on), `atRisk` (1–2 signals) or `offTrack` (3 or more).
 - **Week over week:** Workers Logs keeps about 7 days, so the report ends with a collapsed *Scout data* block holding that week's numbers. The next Monday run reads it from the app's latest project update (only if it is 5 to 14 days old) and compares. If it is missing, the comparison is skipped. Each query returns at most 2000 events; the run warns when a window hit that limit (the numbers then cover part of it).
-- **Add an app:** add `{"project": "<exact Linear project name>", "repo": "owner/repo", "worker": "<Worker name>"}` to `agents/scout/apps.json`. The app must log errors to Workers Logs.
+- **Add an app:** add `{"project": "<exact Linear project name>", "repo": "<repo name, no owner>", "worker": "<Worker name>"}` to `agents/scout/apps.json`. The app must log errors to Workers Logs.
 - **Add a signal for an app:** add an object to that app's `"signals"` list:
   `{"name": "Gemini 429s", "filters": [{"key": "event", "operation": "eq", "value": "gemini_upstream"}], "where": [{"key": "status", "operation": "eq", "value": 429}], "measure": "count", "threshold": 5}`.
   `filters` select the events (also sent to Workers Logs; operations `eq`, `neq`, `gt`, `gte`, `lt`, `lte`); `where` (optional) narrows which of them are counted or, for `share`, form the numerator; `measure` is `count`, `sum`, `avg`, `p95`, `max` or `share` (the last four except `share` need `field`); `by` (optional) gives one number per value of a field (numbers and ids in the value are normalised, 25 groups at most); `unit` is `ms` or `rate` for display; `threshold` (a ticket when the value is above it, with at least `min_count` events, default 1), `worse_pct` and `floor` for the week-over-week rule; `"ticket": false` keeps it report-only; `expect` lists `by` values that should show up, so a never-used one is reported with zero. A `themes` entry takes `name`, `filters`, `where`, `text_field` and `min_count`.
 - **Try it:** `bash agents/scout/scout.sh --dry-run` prints the numbers, the tickets and the weekly report it would create, and doesn't write to Linear (with `LINEAR_API_KEY` set it reads last week's numbers). `SCOUT_MODE=daily` makes a dry run behave like a daily run. `bash agents/scout/test.sh` runs the tests on recorded data.
 - **When it runs:** `.github/workflows/scout.yml` runs it every day at 05:00 UTC (06:00 in winter, 07:00 in summer in Amsterdam), for every app in `apps.json` (Backpack and Feast); that run is the weekly one on Mondays. It needs the repo secrets `CLOUDFLARE_OBSERVABILITY_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `LINEAR_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`; a missing one fails the run with an error naming it. The run also fails if an app's logs can't be read or its Linear project isn't found. Claude's process doesn't get the Cloudflare or Linear values. A second run on the same Monday posts a second report.
 - **Dry run:** GitHub → Actions → *Log scout* → *Run workflow*, keep **Dry run** ticked. It prints what it would create and doesn't touch Linear. Untick it to run for real.
+
+## Changing the GitHub owner
+The factory and the app repos share one owner. Only these places name it:
+- `relay/wrangler.jsonc`: `GITHUB_OWNER`, in both `vars` and the `previews` block. `PROJECT_REPOS` holds bare repo names (an `owner/repo` value still works). If a repo has moved and GitHub answers a build request with a redirect, the relay sends the same request once to the new location and logs that the repo has moved, so builds keep working until you update the setting.
+- `templates/app-repo/.github/workflows/factory.yml`: the three `uses: <owner>/factory/...` lines (GitHub needs a literal name there). The sync workflow opens PRs with the new template in every app repo.
+- Documentation (this README, `CLAUDE.md` files).
+
+Everything else derives it: `build.yml`, `review.yml` and `recheck.yml` use `github.repository_owner`, this repo's own `factory.yml` calls the local workflows (`./.github/workflows/...`), and the log scout gets `GITHUB_OWNER` from the workflow (`agents/scout/apps.json` names repos without an owner).
 
 ## Safety notes
 

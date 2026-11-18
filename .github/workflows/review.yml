@@ -46,7 +46,7 @@ jobs:
       id-token: write
       actions: read
     env:
-      FACTORY_REPO: kverburg/factory
+      FACTORY_REPO: ${{ github.repository_owner }}/factory
       MAX_FIX_ROUNDS: 2
       MAX_FOLLOW_UPS: 3
       PR_NUMBER: ${{ inputs.pr_number }}

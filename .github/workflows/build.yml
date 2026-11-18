@@ -35,7 +35,7 @@ jobs:
     outputs:
       pr_number: ${{ steps.publish.outputs.pr_number }}
     env:
-      FACTORY_REPO: kverburg/factory
+      FACTORY_REPO: ${{ github.repository_owner }}/factory
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
       GH_TOKEN: ${{ github.token }}
       EVENT_TYPE: ${{ github.event.action }}

@@ -16,11 +16,14 @@
     "AUTO_START_LABEL": "Auto-start",
     "MANUAL_LABEL": "factory:manual",
 
-    // Linear project name -> GitHub repo ("owner/repo"). One line per app.
+    // The GitHub user or organization that owns the factory and the app repos.
+    "GITHUB_OWNER": "kverburg",
+
+    // Linear project name -> GitHub repo name ("owner/repo" also works). One line per app.
     "PROJECT_REPOS": {
-      "Factory": "kverburg/factory",
-      "Backpack": "kverburg/backpack",
-      "Feast": "kverburg/feast"
+      "Factory": "factory",
+      "Backpack": "backpack",
+      "Feast": "feast"
     }
   },
 
@@ -38,6 +41,7 @@
       "TODO_STATE": "Todo",
       "AUTO_START_LABEL": "Auto-start",
       "MANUAL_LABEL": "factory:manual",
+      "GITHUB_OWNER": "kverburg",
       "PROJECT_REPOS": {}
     }
   }

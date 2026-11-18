@@ -12,7 +12,7 @@ tpl="$root/templates/app-repo/.github/workflows/factory.yml"
 { echo "# repo-specific header"; echo "name: Old"; } > "$tmp/old.yml"
 cat > "$tmp/config.jsonc" <<'J'
 { "vars": { // c
-  "PROJECT_REPOS": { "Factory": "o/factory", "A": "o/a", "B": "o/b", "C": "o/c" } },
+  "PROJECT_REPOS": { "Factory": "o/factory", "A": "a", "B": "o/b", "C": "o/c" } },
   "env": { "preview": { "vars": { "PROJECT_REPOS": { "X": "o/x" } } } } }
 J
 cat > "$tmp/bin/gh" <<'GH'
