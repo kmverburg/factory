@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 
@@ -506,5 +507,37 @@ describe("releasing blocked tickets", () => {
     await send(stateChange());
     expect(moves()).toEqual([]);
     expect(console.warn).toHaveBeenCalled();
+  });
+});
+
+describe("production config", () => {
+  const config = JSON.parse(
+    readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8").replace(/^\s*\/\/.*$/gm, ""),
+  );
+
+  it("names the same owner in vars and previews, and bare repo names", () => {
+    expect(config.vars.GITHUB_OWNER).toBeTruthy();
+    expect(config.previews.vars.GITHUB_OWNER).toBe(config.vars.GITHUB_OWNER);
+    for (const repo of Object.values(config.vars.PROJECT_REPOS) as string[]) expect(repo).not.toContain("/");
+  });
+
+  it("starts a Backpack build in the owner's repo without touching the ticket", async () => {
+    const prod: Env = { ...env, GITHUB_OWNER: config.vars.GITHUB_OWNER, PROJECT_REPOS: config.vars.PROJECT_REPOS };
+    const pending: Promise<unknown>[] = [];
+    const body = JSON.stringify(stateChange());
+    // Dry run: the dispatch is the only write; ticket updates are Linear mutations, checked below.
+    await worker.fetch(
+      new Request("https://relay.test/", {
+        method: "POST",
+        headers: { "linear-signature": await sign(body) },
+        body,
+      }) as any,
+      prod,
+      { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException() {} } as any,
+    );
+    await Promise.all(pending);
+    expect(githubCalls().map((c) => c.url)).toEqual([
+      `https://api.github.com/repos/${config.vars.GITHUB_OWNER}/backpack/dispatches`,
+    ]);
   });
 });
