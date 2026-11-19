@@ -57,7 +57,7 @@ Linear → Settings → API → Webhooks → New webhook.
 Store the signing secret in Infisical as `LINEAR_WEBHOOK_SECRET` (folder `/cloudflare/factory-relay`); don't paste it into Cloudflare. Opening the Worker URL in a browser should show "factory-relay is running".
 
 ### 5. Each app repo
-1. Copy `templates/app-repo/.github/workflows/factory.yml` into the repo (it already points at `kverburg/factory`; see [Changing the GitHub owner](#changing-the-github-owner)).
+1. Copy `templates/app-repo/.github/workflows/factory.yml` into the repo (it already points at `kmverburg/factory`; see [Changing the GitHub owner](#changing-the-github-owner)).
 2. Copy `templates/app-repo/CLAUDE.md` to the repo root and fill it in. Good commands here make both agents much better.
 3. Repo secrets: don't add them by hand. Add the repo as a sync destination for the `/shared` folder in Infisical, so it gets `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), `LINEAR_API_KEY`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. See [Secrets](#secrets).
 4. Settings → Actions → General → Workflow permissions: tick **Allow GitHub Actions to create and approve pull requests**.
@@ -156,6 +156,8 @@ Two label groups in each Linear team tell you how a ticket came about and how it
 - **Dry run:** GitHub → Actions → *Log scout* → *Run workflow*, keep **Dry run** ticked. It prints what it would create and doesn't touch Linear. Untick it to run for real.
 
 ## Changing the GitHub owner
+The factory and the app repos moved from the personal account `kverburg` to `kmverburg` (the owner of this repo). Old links redirect, but nothing here should name the old account any more.
+
 The factory and the app repos share one owner. Only these places name it:
 - `relay/wrangler.jsonc`: `GITHUB_OWNER`, in both `vars` and the `previews` block. `PROJECT_REPOS` holds bare repo names (an `owner/repo` value still works). If a repo has moved and GitHub answers a build request with a redirect, the relay sends the same request once to the new location and logs that the repo has moved, so builds keep working until you update the setting.
 - `templates/app-repo/.github/workflows/factory.yml`: the three `uses: <owner>/factory/...` lines (GitHub needs a literal name there). The sync workflow opens PRs with the new template in every app repo.
