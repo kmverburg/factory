@@ -1,6 +1,6 @@
 # Sends changes to the caller workflow template to every app repo as a PR ("Update factory caller workflow"),
 # see agents/sync/sync-caller.sh. The app repos are the ones in the relay's PROJECT_REPOS (this repo's own caller
-# is changed directly in the same PR as the template). Can also be started by hand.
+# is changed directly in the same PR as the template). Each PR gets a Linear ticket. Can also be started by hand.
 name: Sync caller workflow
 
 on:
@@ -39,4 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           FACTORY_REPO: ${{ github.repository }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          # The merge commit message: its leading ticket id gets a comment with the new tickets and PRs.
+          TRIGGER_TITLE: ${{ github.event_name == 'push' && github.event.head_commit.message || '' }}
         run: bash agents/sync/sync-caller.sh
