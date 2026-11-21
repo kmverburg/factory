@@ -5,7 +5,8 @@
  * looks up which GitHub repo belongs to the issue's Linear project, triggers
  * the factory build workflow in that repo, and moves the issue to
  * "Agent Working". Anything it can't handle goes to "Needs Human" with a
- * comment explaining why.
+ * comment explaining why. It also reads Linear comments as commands (approve,
+ * change, answers to the builder's questions); see docs/linear-commands.md.
  */
 
 export interface Env {
@@ -70,6 +71,13 @@ export default {
       return new Response("Stale webhook", { status: 401 });
     }
 
+    if (isNewCommentEvent(payload)) {
+      ctx.waitUntil(
+        handleComment(payload.data, env).catch((err) => console.error("handleComment failed", err)),
+      );
+      return new Response("Accepted", { status: 202 });
+    }
+
     if (!isIssueStateEvent(payload)) {
       return new Response("Ignored");
     }
@@ -97,6 +105,149 @@ function isIssueStateEvent(payload: any): boolean {
   if (payload?.type !== "Issue" || !payload?.data?.id) return false;
   if (payload.action === "create") return true;
   return payload.action === "update" && payload.updatedFrom != null && "stateId" in payload.updatedFrom;
+}
+
+/** True for newly created comments on an issue. */
+function isNewCommentEvent(payload: any): boolean {
+  return payload?.type === "Comment" && payload.action === "create" && typeof payload.data?.issueId === "string" && typeof payload.data?.body === "string";
+}
+
+// ---------- Commands in Linear comments ----------
+
+/** Every comment the factory writes starts with one of these, so the relay never reads them as commands. */
+const FACTORY_MARKERS = ["🏭", "🔧", "✅", "🙋", "💥", "🤔"];
+const ANSWERS_HEADING = "## Answers from Koen";
+
+type Command = { kind: "approve" } | { kind: "change"; instructions: string };
+
+/** "approve" or "merge" approves; "change" or "fix" asks for changes with the rest as instructions. Otherwise null. */
+function parseCommand(body: string): Command | null {
+  const match = /^\s*(approve[ds]?|merge[ds]?|changes?|fix(?:es)?)\b[\s:,.!-]*([\s\S]*)$/i.exec(body);
+  if (!match) return null;
+  const word = match[1].toLowerCase();
+  if (word.startsWith("approve") || word.startsWith("merge")) return { kind: "approve" };
+  return { kind: "change", instructions: match[2].trim() };
+}
+
+interface PullRequest {
+  number: number;
+  html_url: string;
+  head: { ref: string };
+  labels: { name: string }[];
+}
+
+/** The open PR for a ticket: its branch starts with the lowercased identifier (kv-45-…). */
+async function findOpenPr(repo: string, identifier: string, env: Env): Promise<PullRequest | null> {
+  const prefix = `${identifier.toLowerCase()}-`;
+  for (let page = 1; page <= 5; page++) {
+    const res = await fetch(`https://api.github.com/repos/${repo}/pulls?state=open&per_page=100&page=${page}`, {
+      headers: githubHeaders(env),
+    });
+    if (!res.ok) throw new Error(`GitHub answered ${res.status} when listing pull requests in ${repo}. The relay's token needs *Pull requests: Read* on it.`);
+    const prs = (await res.json()) as PullRequest[];
+    const found = prs.find((pr) => pr.head.ref.toLowerCase().startsWith(prefix));
+    if (found) return found;
+    if (prs.length < 100) break;
+  }
+  return null;
+}
+
+async function handleComment(data: { id?: string; issueId: string; body: string }, env: Env): Promise<void> {
+  const body = data.body.trim();
+  if (FACTORY_MARKERS.some((m) => body.startsWith(m))) return;
+
+  const command = parseCommand(body);
+  const issue = await getIssue(data.issueId, env);
+  if (!issue) return;
+  const awaitingAnswer = sameName(issue.state.name, env.NEEDS_HUMAN_STATE);
+  if (!command && !awaitingAnswer) return;
+
+  const mapped = issue.project?.name ? findRepo(issue.project.name, env.PROJECT_REPOS) : undefined;
+  if (!mapped) {
+    console.log(`${issue.identifier}: comment ignored, no repo for project "${issue.project?.name ?? "(none)"}"`);
+    return;
+  }
+  const repo = fullRepoName(mapped, env.GITHUB_OWNER);
+
+  let pr: PullRequest | null;
+  try {
+    pr = await findOpenPr(repo, issue.identifier, env);
+  } catch (err) {
+    console.error(`${issue.identifier}: PR lookup failed`, String(err));
+    if (command) await addComment(issue.id, `🏭 Couldn't look up the pull request for this ticket. ${String(err instanceof Error ? err.message : err)}`, env);
+    return;
+  }
+
+  if (!pr) {
+    if (awaitingAnswer) return answerQuestions(issue, body, env);
+    if (command) {
+      await addComment(issue.id, `🏭 Can't ${command.kind === "approve" ? "approve" : "change"} anything: there is no open pull request for ${issue.identifier} in \`${repo}\`.`, env);
+    }
+    return;
+  }
+  if (!command) return;
+
+  const verb = command.kind === "approve" ? "approve" : "change";
+  if (!pr.labels.some((l) => l.name === "agent-built")) {
+    await addComment(issue.id, `🏭 Can't ${verb} ${pr.html_url}: it isn't a factory PR (no \`agent-built\` label), and the factory only merges or changes its own PRs.`, env);
+    return;
+  }
+
+  if (command.kind === "approve") {
+    const response = await dispatchBuild(repo, {
+      event_type: "factory-approve",
+      client_payload: { pr_number: String(pr.number), identifier: issue.identifier },
+    }, env);
+    if (!response.ok) {
+      console.error(`GitHub dispatch to ${repo} failed`, response.status, await response.text());
+      await addComment(issue.id, `🏭 Couldn't start the merge of ${pr.html_url}: ${dispatchFailureMessage(repo, response.status)}`, env);
+      return;
+    }
+    await addComment(issue.id, `🏭 Got it: approving ${pr.html_url}. It merges (squash) once its required checks pass, and I'll say here when it has.`, env);
+    return;
+  }
+
+  if (!command.instructions) {
+    await addComment(issue.id, `🏭 Say what to change, for example \`change: make the button blue\`. Nothing was sent to the builder.`, env);
+    return;
+  }
+  const response = await dispatchBuild(repo, {
+    event_type: "factory-fix",
+    client_payload: {
+      pr_number: String(pr.number),
+      round: "0",
+      requested: "true",
+      identifier: issue.identifier,
+      feedback: command.instructions.slice(0, MAX_DESCRIPTION_CHARS),
+    },
+  }, env);
+  if (!response.ok) {
+    console.error(`GitHub dispatch to ${repo} failed`, response.status, await response.text());
+    await addComment(issue.id, `🏭 Couldn't start a fix round on ${pr.html_url}: ${dispatchFailureMessage(repo, response.status)}`, env);
+    return;
+  }
+  await addComment(issue.id, `🏭 Got it: the builder is applying your changes to ${pr.html_url}. This round doesn't count towards the automatic limit.`, env);
+}
+
+/** The builder asked questions and there is no PR yet: put the comment in the description and send the ticket back to the builder. */
+async function answerQuestions(issue: LinearIssue, answer: string, env: Env): Promise<void> {
+  const ready = issue.team.states.nodes.find((s) => sameName(s.name, env.AGENT_READY_STATE));
+  if (!ready) {
+    console.warn(`Linear state "${env.AGENT_READY_STATE}" not found on the issue's team`);
+    return;
+  }
+  const current = issue.description ?? "";
+  const description = current.includes(ANSWERS_HEADING)
+    ? `${current}\n\n${answer}`
+    : `${current}${current ? "\n\n" : ""}${ANSWERS_HEADING}\n\n${answer}`;
+  await linear(
+    `mutation Answer($id: String!, $description: String!, $stateId: String!) {
+      issueUpdate(id: $id, input: { description: $description, stateId: $stateId }) { success }
+    }`,
+    { id: issue.id, description, stateId: ready.id },
+    env,
+  );
+  await addComment(issue.id, `🏭 Thanks, added your answer to the description under "Answers from Koen" and moved this to ${env.AGENT_READY_STATE}. The builder continues with it.`, env);
 }
 
 async function handleIssue(issueId: string, env: Env): Promise<void> {
@@ -157,6 +308,15 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
   );
 }
 
+function githubHeaders(env: Env): Record<string, string> {
+  return {
+    Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "factory-relay",
+  };
+}
+
 /**
  * Sends the repository_dispatch. GitHub answers 301/307/308 with a Location for a moved repo;
  * fetch would turn a redirected POST into a GET, so follow it by hand, once, with the same POST.
@@ -165,13 +325,7 @@ async function dispatchBuild(repo: string, payload: unknown, env: Env): Promise<
   const init: RequestInit = {
     method: "POST",
     redirect: "manual",
-    headers: {
-      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "factory-relay",
-      "Content-Type": "application/json",
-    },
+    headers: { ...githubHeaders(env), "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   };
   const url = `https://api.github.com/repos/${repo}/dispatches`;

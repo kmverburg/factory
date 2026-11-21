@@ -27,7 +27,11 @@ else
   else
     jq -r .body <<<"$pr" > .factory/ticket.md
   fi
-  printf '%s\n' "$FIX_FEEDBACK" > .factory/review-feedback.md
+  if [ "$FIX_REQUESTED" = "true" ]; then
+    printf 'Koen asked for these changes in a Linear comment. Do what he says.\n\n%s\n' "$FIX_FEEDBACK" > .factory/review-feedback.md
+  else
+    printf '%s\n' "$FIX_FEEDBACK" > .factory/review-feedback.md
+  fi
   checks_collect_failed .factory/checks || echo "::warning::Couldn't collect check details."
   linear_set_state "$ISSUE_IDENTIFIER" "Agent Working"
 fi
