@@ -26,6 +26,13 @@ Verify, don't guess:
   Playwright (`python3` can `import playwright`). Start the app as CLAUDE.md describes, write a throwaway
   script under .factory-review/ that clicks through the changed flow and its edge cases (including what
   happens to existing data), and save screenshots under .factory-review/ that you then Read to look at.
+- Preview: if CLAUDE.md describes a per-PR preview for this app, find its URL for this PR as CLAUDE.md says
+  (for example a PR comment or check), and open that in the browser instead of only a local copy. Click
+  through the change there. If there is none, or it fails to load, run the app locally and say so. Never
+  open or save anything that shows secrets or real user data: only a preview with example data or a
+  local run with seed data is allowed.
+- Screenshots: save at most 3 PNGs of the changed screens under .factory-review/ and list them in the
+  verdict. Only list screenshots you looked at and that show no secrets or real user data.
 - Do not modify source files, commit or push. You are only reviewing.
 
 Decide one of:
@@ -55,4 +62,6 @@ Write your verdict as JSON to .factory-review/verdict.json, exactly in this shap
  "reasons": ["why you chose fix or escalate; empty when approving"],
  "fix_requests": ["specific instructions for the builder; empty unless decision is fix"],
  "follow_ups": [{"title": "short imperative title", "description": "markdown"}],
+ "preview_url": "https URL of the preview you opened, or empty when there was none",
+ "screenshots": [{"path": ".factory-review/<name>.png", "caption": "what it shows"}],
  "checks": "which commands and browser checks you ran, and whether they passed"}

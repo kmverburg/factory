@@ -47,4 +47,14 @@ check "rename out of .github/ -> escalate" escalate "$(
 check "normal change, approve/low -> approve" approve "$(run d src/app.ts "$approve")"
 check "normal change: auto-merge enabled" 1 "$(grep -c 'pr merge' "$tmp/gh.log" || true)"
 check "lookalike path is not .github/" approve "$(run e docs/.github/x.md "$approve")"
+
+# Preview link and screenshots in the PR comment (no Linear here, so nothing is uploaded).
+withprev='{"decision":"approve","risk":"low","summary":"s","reasons":[],"fix_requests":[],"follow_ups":[],"checks":"c","preview_url":"https://pr-1.example.dev","screenshots":[{"path":"/etc/passwd","caption":"x"}]}'
+run f src/app.ts "$withprev" >/dev/null
+check "PR comment has the preview link" 1 "$(grep -c 'Preview:\*\* https://pr-1.example.dev' "$tmp/comment.md" || true)"
+check "no image without Linear upload" 0 "$(grep -c '!\[' "$tmp/comment.md" || true)"
+run g src/app.ts "$approve" >/dev/null
+check "no preview: says it wasn't available" 1 "$(grep -c 'Preview:\*\* not available' "$tmp/comment.md" || true)"
+run h src/app.ts "${withprev/https:\/\/pr-1.example.dev/javascript:alert(1)}" >/dev/null
+check "non-https preview URL is dropped" 1 "$(grep -c 'Preview:\*\* not available' "$tmp/comment.md" || true)"
 exit $fail
