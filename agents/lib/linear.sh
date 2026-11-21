@@ -151,3 +151,18 @@ linear_project_update_create() {
     "$(jq -n --arg p "$1" --arg b "$2" --arg h "$3" '{p: $p, b: $b, h: $h}')" \
     | jq -r '.data.projectUpdateCreate.projectUpdate.url // empty'
 }
+# $1 = PNG file. Uploads it to Linear and prints the asset URL (usable as a markdown image), or nothing.
+# Warns instead of failing.
+linear_upload_image() {
+  local size resp url asset args=() k v
+  size=$(wc -c < "$1" | tr -d ' ')
+  resp=$(linear_gql 'mutation($t: String!, $f: String!, $s: Int!) { fileUpload(contentType: $t, filename: $f, size: $s) { uploadFile { uploadUrl assetUrl headers { key value } } } }' \
+    "$(jq -n --arg f "$(basename "$1")" --argjson s "$size" '{t: "image/png", f: $f, s: $s}')") || { echo "::warning::Linear upload request failed" >&2; return 0; }
+  url=$(jq -r '.data.fileUpload.uploadFile.uploadUrl // empty' <<<"$resp")
+  asset=$(jq -r '.data.fileUpload.uploadFile.assetUrl // empty' <<<"$resp")
+  [ -n "$url" ] && [ -n "$asset" ] || { echo "::warning::Linear gave no upload URL" >&2; return 0; }
+  args=(-H "Content-Type: image/png" -H "Cache-Control: public, max-age=31536000")
+  while IFS=$'\t' read -r k v; do [ -n "$k" ] && args+=(-H "$k: $v"); done < <(jq -r '.data.fileUpload.uploadFile.headers[]? | "\(.key)\t\(.value)"' <<<"$resp")
+  if curl -sS --fail -X PUT "${args[@]}" --data-binary @"$1" "$url" >/dev/null; then echo "$asset"
+  else echo "::warning::Uploading $1 to Linear failed" >&2; fi
+}

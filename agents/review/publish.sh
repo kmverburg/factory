@@ -65,6 +65,27 @@ if [ -n "$IDENTIFIER" ] && [ "$IS_FOLLOW_UP" != "true" ]; then
   fi
 fi
 
+# Preview link and screenshots. The reviewer names the preview URL and up to 3 PNGs under .factory-review/;
+# only those are uploaded to Linear, and the markdown goes in both the PR and the Linear comment.
+preview_md=""
+preview_url=$(jq -r '.preview_url // ""' "$v")
+[[ "$preview_url" =~ ^https://[^[:space:]\<\>\(\)]+$ ]] || preview_url=""
+if [ -n "$preview_url" ]; then preview_md="**Preview:** $preview_url"
+else preview_md="**Preview:** not available (none for this app, or it failed). Any screenshots are from a local run."; fi
+shots=""
+while IFS=$'\t' read -r shot caption; do
+  [ -n "$shot" ] || continue
+  case "$shot" in .factory-review/*.png) ;; *) continue ;; esac
+  case "$shot" in *..*) continue ;; esac
+  [ -f "$shot" ] && [ ! -L "$shot" ] && [ "$(wc -c < "$shot")" -le 5000000 ] || continue
+  [ -n "$IDENTIFIER" ] || continue
+  asset=$(linear_upload_image "$shot") || true
+  [ -n "$asset" ] || continue
+  caption=$(printf '%s' "$caption" | tr -d '[]\n' | cut -c1-100)
+  shots="$shots$(printf '\n![%s](%s)' "${caption:-screenshot}" "$asset")"
+done < <(jq -r '[.screenshots // [] | .[] | select(type == "object") | select((.path // "") != "")] | .[:3][] | "\(.path)\t\(.caption // "")"' "$v")
+[ -z "$shots" ] || preview_md="$preview_md"$'\n'"$shots"
+
 {
   case "$decision" in
     approve)
@@ -86,6 +107,7 @@ fi
     echo; echo "**Follow-up tickets created (Todo):**"; echo "$created"
   fi
   echo; echo "**Checks:** $(jq -r '.checks // "not reported"' "$v")"
+  echo; printf '%s\n' "$preview_md"
 } > "$RUNNER_TEMP/comment.md"
 gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/comment.md"
 
@@ -100,9 +122,13 @@ case "$decision" in
     gh pr edit "$PR_NUMBER" --add-label agent-approved --remove-label needs-human --remove-label agent-fixing
     if [ -n "$IDENTIFIER" ]; then
       if [ "$auto_merge" = "true" ]; then
-        linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Approved, will merge automatically when checks pass.$follow_note"
+        linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Approved, will merge automatically when checks pass.$follow_note
+
+$preview_md"
       else
-        linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Not merging automatically: $merge_note. Merge it yourself.$follow_note"
+        linear_comment "$IDENTIFIER" "✅ Reviewer agent approved $pr_url (risk: $risk). Not merging automatically: $merge_note. Merge it yourself.$follow_note
+
+$preview_md"
       fi
       linear_set_state "$IDENTIFIER" "In Review"
       if [ "$auto_merge" = "true" ]; then linear_set_group_label "$IDENTIFIER" Delivery Autonomous
@@ -116,12 +142,14 @@ case "$decision" in
       '{event_type: "factory-fix", client_payload: {pr_number: $pr, round: $round, identifier: $id, feedback: $fb}}' \
       > "$RUNNER_TEMP/dispatch.json"
     gh api "repos/$GITHUB_REPOSITORY/dispatches" --input "$RUNNER_TEMP/dispatch.json"
-    linear_comment "$IDENTIFIER" "$(printf '🔧 Reviewer asked for fixes on %s (round %s of %s). The builder is on it:\n\n%s%s' "$pr_url" "$((round + 1))" "$MAX_FIX_ROUNDS" "$feedback" "$follow_note")"
+    linear_comment "$IDENTIFIER" "$(printf '🔧 Reviewer asked for fixes on %s (round %s of %s). The builder is on it:\n\n%s%s' "$pr_url" "$((round + 1))" "$MAX_FIX_ROUNDS" "$feedback" "$follow_note")
+
+$preview_md"
     ;;
   *)
     gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-approved --remove-label agent-fixing
     if [ -n "$IDENTIFIER" ]; then
-      linear_comment "$IDENTIFIER" "$(printf '🙋 Reviewer agent wants you to look at %s\n\n' "$pr_url"; jq -r '.reasons[]? | "- \(.)"' "$v"; printf '%s' "$follow_note")"
+      linear_comment "$IDENTIFIER" "$(printf '🙋 Reviewer agent wants you to look at %s\n\n' "$pr_url"; jq -r '.reasons[]? | "- \(.)"' "$v"; printf '%s\n\n%s' "$follow_note" "$preview_md")"
       linear_set_state "$IDENTIFIER" "Needs Human"
       linear_set_group_label "$IDENTIFIER" Delivery "Human involved"
     fi
