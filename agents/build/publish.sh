@@ -23,6 +23,8 @@ rm -rf .factory
 
 if [ "$EVENT_TYPE" = "factory-build" ]; then
   message="$ISSUE_IDENTIFIER: $ISSUE_TITLE"
+elif [ "$FIX_REQUESTED" = "true" ]; then
+  message="$ISSUE_IDENTIFIER: apply the changes Koen asked for"
 else
   message="$ISSUE_IDENTIFIER: address review feedback (round $FIX_ROUND)"
 fi
@@ -65,8 +67,13 @@ if [ "$EVENT_TYPE" = "factory-build" ]; then
 else
   git push origin "$BRANCH"
   pr_number="$PR_NUMBER"
-  { echo "### 🔧 Builder applied review fixes (round $FIX_ROUND)"; echo; cat "$body_file"; } > "$RUNNER_TEMP/fix_comment.md"
+  if [ "$FIX_REQUESTED" = "true" ]; then fix_title="Builder applied the changes Koen asked for"; else fix_title="Builder applied review fixes (round $FIX_ROUND)"; fi
+  { echo "### 🔧 $fix_title"; echo; cat "$body_file"; } > "$RUNNER_TEMP/fix_comment.md"
   gh pr comment "$pr_number" --body-file "$RUNNER_TEMP/fix_comment.md"
-  linear_comment "$ISSUE_IDENTIFIER" "🔧 Builder pushed fixes for round $FIX_ROUND. The reviewer agent is checking again."
+  if [ "$FIX_REQUESTED" = "true" ]; then
+    linear_comment "$ISSUE_IDENTIFIER" "🔧 Builder pushed the changes you asked for. The reviewer agent is checking again."
+  else
+    linear_comment "$ISSUE_IDENTIFIER" "🔧 Builder pushed fixes for round $FIX_ROUND. The reviewer agent is checking again."
+  fi
 fi
 echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"

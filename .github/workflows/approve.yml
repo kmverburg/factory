@@ -1,0 +1,57 @@
+# Approve (KV-45). Called from each app repo's factory.yml for factory-approve events, which the relay
+# sends when Koen comments "approve" or "merge" on a ticket whose agent PR is open. Merges the PR (squash,
+# delete branch) with the factory app's token once its required checks pass, and reports in Linear.
+# The logic lives in agents/approve/ of the factory repo, fetched at run time from main.
+name: Factory approve
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      identifier:
+        required: true
+        type: string
+    secrets:
+      LINEAR_API_KEY:
+        required: false
+      FACTORY_APP_ID:
+        required: false
+      FACTORY_APP_PRIVATE_KEY:
+        required: false
+
+jobs:
+  approve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      FACTORY_REPO: ${{ github.repository_owner }}/factory
+      HAS_APP: ${{ secrets.FACTORY_APP_ID != '' }}
+    steps:
+      - name: Fetch factory scripts
+        run: |
+          git clone -q --depth 1 "https://github.com/$FACTORY_REPO.git" "$RUNNER_TEMP/factory"
+          echo "FACTORY_DIR=$RUNNER_TEMP/factory" >> "$GITHUB_ENV"
+
+      # The merge counts as the app's, so it starts the repo's deploy workflows (the workflow token can't).
+      - name: Factory app token
+        id: app
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Merge
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          IDENTIFIER: ${{ inputs.identifier }}
+        run: bash "$FACTORY_DIR/agents/approve/approve.sh"

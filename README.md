@@ -123,6 +123,10 @@ One-time setup for this repo, the same as step 5 for an app:
 3. The Claude GitHub App has access to this repo.
 4. The relay's GitHub token (`GITHUB_TOKEN`, from Infisical's `/cloudflare/factory-relay` folder) includes this repo, with *Contents: Read and write*.
 
+### Linear comment commands
+
+Koen can also approve a PR, ask for changes or answer the builder's questions by commenting on the Linear ticket: see [Linear comment commands](docs/linear-commands.md).
+
 ### Blocked tickets and Auto-start
 
 Tickets that wait on other tickets start by themselves. Put the ticket in the **Blocked** status (add it to the *Unstarted* category in the team's statuses) and mark the others as blocking it with Linear's *blocks* relation. When a blocking ticket reaches a Done (completed) or canceled status, the relay checks every ticket it blocks that is in Blocked. If none of that ticket's blockers is still open, it moves:

@@ -40,6 +40,8 @@ let githubRedirects: Record<string, { status: number; location: string }>;
 let originLabels: { id: string; name: string }[];
 let labelUpdateFails: boolean;
 let blockerIssue: any;
+let pulls: any[];
+let pullsStatus: number;
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
@@ -70,6 +72,8 @@ beforeEach(() => {
   ];
   labelUpdateFails = false;
   blockerIssue = null;
+  pulls = [];
+  pullsStatus = 200;
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -85,6 +89,7 @@ beforeEach(() => {
       return json({ data: { ok: { success: true } } });
     }
     if (url.startsWith("https://api.github.com/")) {
+      if (url.includes("/pulls?")) return json(pulls, pullsStatus);
       const redirect = githubRedirects[url];
       if (redirect) return new Response(null, { status: redirect.status, headers: { Location: redirect.location } });
       return new Response(githubStatus === 204 ? null : "nope", { status: githubStatus });
@@ -539,5 +544,180 @@ describe("production config", () => {
     expect(githubCalls().map((c) => c.url)).toEqual([
       `https://api.github.com/repos/${config.vars.GITHUB_OWNER}/backpack/dispatches`,
     ]);
+  });
+});
+
+describe("Linear comment commands", () => {
+  const agentPr = (overrides: Record<string, unknown> = {}) => ({
+    number: 7,
+    html_url: "https://github.com/acme/backpack/pull/7",
+    head: { ref: "koe-1-do-a-thing" },
+    labels: [{ name: "agent-built" }],
+    ...overrides,
+  });
+  const comment = (body: string, overrides: Record<string, unknown> = {}) => ({
+    type: "Comment",
+    action: "create",
+    data: { id: "c-1", issueId: "issue-1", body },
+    webhookTimestamp: Date.now(),
+    ...overrides,
+  });
+  const dispatches = () => githubCalls().filter((c) => c.url.endsWith("/dispatches"));
+  const issueUpdates = () => linearCalls().filter((c) => c.body.query.includes("Answer"));
+
+  beforeEach(() => {
+    issue = makeIssue({ state: { id: "s-review", name: "In Review" } });
+    pulls = [agentPr()];
+  });
+
+  it("approves: dispatches factory-approve and confirms", async () => {
+    for (const word of ["approve", "Approved!", "merge", "  MERGE it"]) {
+      calls = [];
+      const res = await send(comment(word));
+      expect(res.status).toBe(202);
+      expect(dispatches()).toHaveLength(1);
+      expect(dispatches()[0].url).toBe("https://api.github.com/repos/acme/backpack/dispatches");
+      expect(dispatches()[0].body).toEqual({
+        event_type: "factory-approve",
+        client_payload: { pr_number: "7", identifier: "KOE-1" },
+      });
+      expect(comments()).toHaveLength(1);
+      expect(comments()[0]).toMatch(/^🏭 Got it: approving/);
+    }
+  });
+
+  it("asks for changes: dispatches an uncounted factory-fix with the instructions", async () => {
+    await send(comment("change: make the button blue\nand bigger"));
+    expect(dispatches()).toHaveLength(1);
+    expect(dispatches()[0].body).toEqual({
+      event_type: "factory-fix",
+      client_payload: {
+        pr_number: "7",
+        round: "0",
+        requested: "true",
+        identifier: "KOE-1",
+        feedback: "make the button blue\nand bigger",
+      },
+    });
+    expect(comments()[0]).toMatch(/^🏭 Got it: the builder is applying your changes/);
+    expect(comments()[0]).toContain("doesn't count");
+  });
+
+  it("accepts fix as well as change", async () => {
+    await send(comment("Fix the typo in the header"));
+    expect(dispatches()[0].body.client_payload.feedback).toBe("the typo in the header");
+  });
+
+  it("doesn't send an empty change request", async () => {
+    await send(comment("change"));
+    expect(dispatches()).toHaveLength(0);
+    expect(comments()[0]).toMatch(/^🏭 Say what to change/);
+  });
+
+  it("refuses to approve or change a PR that isn't the factory's", async () => {
+    pulls = [agentPr({ labels: [] })];
+    for (const word of ["approve", "change: x"]) {
+      calls = [];
+      await send(comment(word));
+      expect(dispatches()).toHaveLength(0);
+      expect(comments()).toHaveLength(1);
+      expect(comments()[0]).toContain("isn't a factory PR");
+    }
+  });
+
+  it("says so when the ticket has no open PR", async () => {
+    pulls = [agentPr({ head: { ref: "koe-12-other" } })];
+    await send(comment("approve"));
+    expect(dispatches()).toHaveLength(0);
+    expect(comments()[0]).toContain("no open pull request");
+  });
+
+  it("explains a failed PR lookup", async () => {
+    pullsStatus = 403;
+    await send(comment("approve"));
+    expect(dispatches()).toHaveLength(0);
+    expect(comments()[0]).toContain("Pull requests: Read");
+  });
+
+  it("explains a failed dispatch", async () => {
+    githubStatus = 404;
+    await send(comment("approve"));
+    expect(comments()[0]).toMatch(/^🏭 Couldn't start the merge/);
+  });
+
+  it("ignores the factory's own comments, whatever they say", async () => {
+    issue = makeIssue({ state: { id: "s-human", name: "Needs Human" } });
+    for (const marker of ["🏭", "🔧", "✅", "🙋", "💥", "🤔"]) {
+      calls = [];
+      await send(comment(`${marker} approve everything. fix it`));
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  it("ignores comments that aren't commands", async () => {
+    for (const text of ["looks good to me", "Can you approve this?", "prefix the title", "unfixed"]) {
+      calls = [];
+      await send(comment(text));
+      expect(dispatches()).toHaveLength(0);
+      expect(comments()).toHaveLength(0);
+    }
+  });
+
+  it("ignores edited and deleted comments and comments without an issue", async () => {
+    await send(comment("approve", { action: "update" }));
+    await send(comment("approve", { action: "remove" }));
+    await send(comment("approve", { data: { id: "c", body: "approve" } }));
+    expect(calls).toHaveLength(0);
+  });
+
+  it("ignores comments on tickets in unmapped projects", async () => {
+    issue = makeIssue({ project: { name: "Other" } });
+    await send(comment("approve"));
+    expect(githubCalls()).toHaveLength(0);
+  });
+
+  it("rejects a comment webhook with a bad signature", async () => {
+    const res = await send(comment("approve"), { secret: "other" });
+    expect(res.status).toBe(401);
+    expect(calls).toHaveLength(0);
+  });
+
+  describe("answers to the builder's questions", () => {
+    beforeEach(() => {
+      issue = makeIssue({ state: { id: "s-human", name: "Needs Human" }, description: "Details" });
+      pulls = [];
+    });
+
+    it("adds the comment under Answers from Koen and moves the ticket to Agent Ready", async () => {
+      await send(comment("Use the blue one."));
+      expect(issueUpdates()).toHaveLength(1);
+      expect(issueUpdates()[0].body.variables).toEqual({
+        id: "issue-1",
+        description: "Details\n\n## Answers from Koen\n\nUse the blue one.",
+        stateId: "s-ready",
+      });
+      expect(comments()[0]).toMatch(/^🏭 Thanks/);
+      expect(dispatches()).toHaveLength(0);
+    });
+
+    it("appends a later answer to the existing section", async () => {
+      issue = makeIssue({ state: { id: "s-human", name: "Needs Human" }, description: "Details\n\n## Answers from Koen\n\nFirst." });
+      await send(comment("Second."));
+      expect(issueUpdates()[0].body.variables.description).toBe("Details\n\n## Answers from Koen\n\nFirst.\n\nSecond.");
+    });
+
+    it("treats even an approve comment as an answer when there is no PR", async () => {
+      await send(comment("approve the blue one"));
+      expect(issueUpdates()).toHaveLength(1);
+    });
+
+    it("leaves a Needs Human ticket with a PR to the commands", async () => {
+      pulls = [agentPr()];
+      await send(comment("thanks, will look"));
+      expect(issueUpdates()).toHaveLength(0);
+      expect(comments()).toHaveLength(0);
+      await send(comment("approve"));
+      expect(dispatches()).toHaveLength(1);
+    });
   });
 });

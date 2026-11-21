@@ -1,6 +1,6 @@
 # Builder agent. Called from each app repo's factory.yml for two events:
 #   factory-build: a Linear issue moved to "Agent Ready" (sent by the relay)
-#   factory-fix:   the reviewer asked for changes on an agent PR (sent by the reviewer)
+#   factory-fix:   the reviewer (or Koen, in a Linear comment) asked for changes on an agent PR
 # The logic lives in agents/build/ and agents/lib/ of the factory repo, fetched at run
 # time from main, so the factory can change it through normal PRs.
 name: Factory build
@@ -46,6 +46,8 @@ jobs:
       PR_NUMBER: ${{ github.event.client_payload.pr_number }}
       FIX_ROUND: ${{ github.event.client_payload.round }}
       FIX_FEEDBACK: ${{ github.event.client_payload.feedback }}
+      # "true" when Koen asked for the changes in a Linear comment (KV-45)
+      FIX_REQUESTED: ${{ github.event.client_payload.requested }}
       HAS_APP: ${{ secrets.FACTORY_APP_ID != '' }}
 
     steps:
