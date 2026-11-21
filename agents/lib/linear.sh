@@ -151,3 +151,9 @@ linear_project_update_create() {
     "$(jq -n --arg p "$1" --arg b "$2" --arg h "$3" '{p: $p, b: $b, h: $h}')" \
     | jq -r '.data.projectUpdateCreate.projectUpdate.url // empty'
 }
+# $1 = issue uuid, $2 = new markdown description
+linear_update_description() {
+  linear_gql 'mutation($i: String!, $d: String!) { issueUpdate(id: $i, input: { description: $d }) { success } }' \
+    "$(jq -n --arg i "$1" --arg d "$2" '{i: $i, d: $d}')" >/dev/null \
+    || echo "::warning::Linear description update failed"
+}

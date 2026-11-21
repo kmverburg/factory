@@ -541,3 +541,47 @@ describe("production config", () => {
     ]);
   });
 });
+
+describe("deep health route", () => {
+  const get = (path: string, token?: string, e: Env = env) =>
+    worker.fetch(
+      new Request(`https://relay.test${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} }) as any,
+      e,
+      { waitUntil() {}, passThroughOnException() {} } as any,
+    );
+  const withSecret = { ...env, HEALTH_CHECK_SECRET: "hc-secret" };
+
+  it("plain GET and /health stay a simple smoke test", async () => {
+    expect(await (await get("/")).text()).toBe("factory-relay is running");
+    expect(await (await get("/health", undefined, withSecret)).text()).toBe("factory-relay is running");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("is off without HEALTH_CHECK_SECRET", async () => {
+    expect((await get("/health?deep=1", "anything")).status).toBe(404);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects a missing or wrong secret without calling anything", async () => {
+    expect((await get("/health?deep=1", undefined, withSecret)).status).toBe(401);
+    expect((await get("/health?deep=1", "wrong", withSecret)).status).toBe(401);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("reports token status without leaking values", async () => {
+    const res = await get("/health?deep=1", "hc-secret", withSecret);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const data = JSON.parse(text);
+    expect(data).toMatchObject({ ok: true, github: { ok: true }, linear: { ok: true } });
+    expect(data.secrets).toEqual({ LINEAR_API_KEY: true, LINEAR_WEBHOOK_SECRET: true, GITHUB_TOKEN: true });
+    for (const value of ["gh-token", "linear-key", SECRET, "hc-secret"]) expect(text).not.toContain(value);
+    expect(githubCalls().map((c) => c.url)).toEqual(["https://api.github.com/rate_limit"]);
+  });
+
+  it("flags an invalid GitHub token", async () => {
+    githubStatus = 401;
+    const data: any = await (await get("/health?deep=1", "hc-secret", withSecret)).json();
+    expect(data).toMatchObject({ ok: false, github: { ok: false, status: 401 } });
+  });
+});

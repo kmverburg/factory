@@ -85,6 +85,7 @@ All secrets live in one Infisical project, `factory`, environment `prod`. There 
 | `CLOUDFLARE_OBSERVABILITY_TOKEN` | Read-only token that lets the log scout read Workers Logs ([KOE-17](https://linear.app/koenv/issue/KOE-17/log-scout-turn-app-errors-into-linear-tickets)) | `/github/factory` → factory repo |
 | `LINEAR_WEBHOOK_SECRET` | Verifies that webhooks really come from Linear | `/cloudflare/factory-relay` → `factory` Worker |
 | `GITHUB_TOKEN` (relay) | Lets the relay start builds in the app repos | `/cloudflare/factory-relay` → `factory` Worker |
+| `HEALTH_CHECK_SECRET` | Lets the daily health check call the relay's `/health?deep=1` | `/shared` → factory repo, and `/cloudflare/factory-relay` → `factory` Worker |
 
 ### Local development
 Run the relay with dummy secrets from Infisical's `dev` environment instead of creating `relay/.dev.vars` by hand:
@@ -154,6 +155,9 @@ Two label groups in each Linear team tell you how a ticket came about and how it
 - **Try it:** `bash agents/scout/scout.sh --dry-run` prints the numbers, the tickets and the weekly report it would create, and doesn't write to Linear (with `LINEAR_API_KEY` set it reads last week's numbers). `SCOUT_MODE=daily` makes a dry run behave like a daily run. `bash agents/scout/test.sh` runs the tests on recorded data.
 - **When it runs:** `.github/workflows/scout.yml` runs it every day at 05:00 UTC (06:00 in winter, 07:00 in summer in Amsterdam), for every app in `apps.json` (Backpack and Feast); that run is the weekly one on Mondays. It needs the repo secrets `CLOUDFLARE_OBSERVABILITY_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `LINEAR_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`; a missing one fails the run with an error naming it. The run also fails if an app's logs can't be read or its Linear project isn't found. Claude's process doesn't get the Cloudflare or Linear values. A second run on the same Monday posts a second report.
 - **Dry run:** GitHub → Actions → *Log scout* → *Run workflow*, keep **Dry run** ticked. It prints what it would create and doesn't touch Linear. Untick it to run for real.
+
+## Health check
+The factory tests itself every day and files a Linear ticket for each broken part (relay, GitHub, Cloudflare, Linear, secrets): see [docs/health-check.md](docs/health-check.md).
 
 ## Changing the GitHub owner
 The factory and the app repos moved from the personal account `kverburg` to `kmverburg` (the owner of this repo). Old links redirect, but nothing here should name the old account any more.

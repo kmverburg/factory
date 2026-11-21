@@ -13,6 +13,8 @@ export interface Env {
   LINEAR_API_KEY: string;
   LINEAR_WEBHOOK_SECRET: string;
   GITHUB_TOKEN: string;
+  // Optional shared secret for `GET /health?deep=1` (the daily health check). Without it the deep check is off.
+  HEALTH_CHECK_SECRET?: string;
 
   // Plain vars (set in wrangler.jsonc)
   AGENT_READY_STATE: string;
@@ -46,6 +48,8 @@ const MAX_WEBHOOK_AGE_MS = 5 * 60 * 1000;
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     if (request.method === "GET") {
+      const url = new URL(request.url);
+      if (url.pathname === "/health" && url.searchParams.get("deep") === "1") return deepHealth(request, env);
       return new Response("factory-relay is running");
     }
     if (request.method !== "POST") {
@@ -91,6 +95,51 @@ export default {
     return new Response("Accepted", { status: 202 });
   },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * `GET /health?deep=1` with `Authorization: Bearer <HEALTH_CHECK_SECRET>`: checks, read-only, that the relay's
+ * GitHub token and Linear key still work and that its secrets are set. Never returns a secret value.
+ */
+async function deepHealth(request: Request, env: Env): Promise<Response> {
+  if (!env.HEALTH_CHECK_SECRET) return new Response("Not found", { status: 404 });
+  const given = (request.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!(await sameSecret(given, env.HEALTH_CHECK_SECRET))) return new Response("Unauthorized", { status: 401 });
+
+  let github: { ok: boolean; status: number | null };
+  try {
+    const res = await fetch("https://api.github.com/rate_limit", {
+      headers: {
+        Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "factory-relay",
+      },
+    });
+    github = { ok: res.ok, status: res.status };
+  } catch {
+    github = { ok: false, status: null };
+  }
+  let linearOk = true;
+  try {
+    await linear<{ viewer: { id: string } }>("query Health { viewer { id } }", {}, env);
+  } catch {
+    linearOk = false;
+  }
+  const secrets = {
+    LINEAR_API_KEY: !!env.LINEAR_API_KEY,
+    LINEAR_WEBHOOK_SECRET: !!env.LINEAR_WEBHOOK_SECRET,
+    GITHUB_TOKEN: !!env.GITHUB_TOKEN,
+  };
+  const ok = github.ok && linearOk && Object.values(secrets).every(Boolean);
+  return Response.json({ ok, github, linear: { ok: linearOk }, secrets });
+}
+
+/** Compares two secrets without leaking their length or where they differ. */
+async function sameSecret(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([a, b].map(async (v) => new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(v)))));
+  return crypto.subtle.timingSafeEqual(ha, hb);
+}
 
 /** True for newly created issues and for updates that changed the state. */
 function isIssueStateEvent(payload: any): boolean {
