@@ -151,3 +151,9 @@ linear_project_update_create() {
     "$(jq -n --arg p "$1" --arg b "$2" --arg h "$3" '{p: $p, b: $b, h: $h}')" \
     | jq -r '.data.projectUpdateCreate.projectUpdate.url // empty'
 }
+# $1 = issue identifier, $2 = text. Succeeds when a comment on the issue contains the text (used for "already done" markers).
+linear_has_comment() {
+  linear_gql 'query($id: String!) { issue(id: $id) { comments(first: 250) { nodes { body } } } }' \
+    "$(jq -n --arg id "$1" '{id: $id}')" \
+    | jq -e --arg t "$2" '[.data.issue.comments.nodes[]? | select(.body | contains($t))] | length > 0' >/dev/null 2>&1
+}

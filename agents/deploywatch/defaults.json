@@ -1,0 +1,10 @@
+{
+  "workflow": "deploy.yml",
+  "min_requests": 50,
+  "error_ratio": 2,
+  "min_errors": 5,
+  "error_5xx_ratio": 2,
+  "min_5xx": 5,
+  "p95_slower_pct": 50,
+  "p95_min_increase_ms": 100
+}

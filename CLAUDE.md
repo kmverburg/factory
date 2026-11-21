@@ -9,6 +9,7 @@ The software factory itself. Linear issues in "Agent Ready" go through the relay
 - `.github/workflows/build.yml` and `review.yml`: thin reusable workflows that every app repo calls. They fetch `agents/` from `main` at run time.
 - `.github/workflows/factory.yml`: this repo's own caller, so the factory can build itself.
 - `agents/sync/`: `sync-caller.sh` (run by `.github/workflows/sync-caller.yml`) opens "Update factory caller workflow" PRs in every app repo in `PROJECT_REPOS` when the template caller changes. Test: `bash agents/sync/test.sh`.
+- `agents/deploywatch/`: the deploy watch (`watch.sh`, run every 15 minutes by `.github/workflows/deploy-watch.yml`; docs in `docs/deploy-watch.md`). Test: `bash agents/deploywatch/test.sh`.
 - `templates/`: files to copy into a new app repo.
 
 Everything in `agents/` goes live for **all** app repos as soon as it's merged to `main`. A PR's own changes are never used to review that PR.
