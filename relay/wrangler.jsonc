@@ -15,6 +15,8 @@
     "TODO_STATE": "Todo",
     "AUTO_START_LABEL": "Auto-start",
     "MANUAL_LABEL": "factory:manual",
+    // Rough notes in Triage are rewritten by the issue writer workflow in this repo (name, or "owner/repo").
+    "FACTORY_REPO": "factory",
 
     // The GitHub user or organization that owns the factory and the app repos.
     "GITHUB_OWNER": "kmverburg",

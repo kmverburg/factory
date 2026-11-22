@@ -15,6 +15,7 @@ const env: Env = {
   TODO_STATE: "Todo",
   AUTO_START_LABEL: "Auto-start",
   MANUAL_LABEL: "factory:manual",
+  FACTORY_REPO: "factory",
   GITHUB_OWNER: "acme",
   PROJECT_REPOS: { Backpack: "acme/backpack", Feast: "feast" },
 };
@@ -83,6 +84,7 @@ beforeEach(() => {
     calls.push({ url, init, body });
     if (url === "https://api.linear.app/graphql") {
       if (body.query.includes("BlockedByThis")) return json({ data: { issue: blockerIssue } });
+      if (body.query.includes("RoughNote")) return json({ data: { issue } });
       if (body.query.includes("query Issue")) return json({ data: { issue } });
       if (body.query.includes("OriginLabels")) return json({ data: { issueLabels: { nodes: originLabels } } });
       if (body.query.includes("AddOrigin") && labelUpdateFails) return json({ errors: [{ message: "boom" }] }, 500);
@@ -336,6 +338,63 @@ describe("Origin label", () => {
     expect(labelAdds()).toHaveLength(0);
     expect(console.warn).toHaveBeenCalled();
     expect(githubCalls()).toHaveLength(1);
+  });
+});
+
+describe("rough notes in Triage", () => {
+  const note = (stateType: string, labelIds?: string[]) =>
+    stateChange({ action: "create", updatedFrom: undefined, data: { id: "issue-1", labelIds, state: { type: stateType } } });
+  const writerDispatches = () => githubCalls().filter((c) => c.body?.event_type === "factory-issue-writer");
+
+  it("hands a new Triage ticket without Origin label to the issue writer in the factory repo", async () => {
+    issue = makeIssue({ description: "backpack: weight per item?", project: null, state: { id: "s-triage", name: "Triage" } });
+    await send(note("triage", []));
+    expect(labelAdds()).toEqual([{ id: "issue-1", labelId: "l-human" }]);
+    const [call] = writerDispatches();
+    expect(call.url).toBe("https://api.github.com/repos/acme/factory/dispatches");
+    expect(call.body.client_payload).toMatchObject({
+      issue_id: "issue-1",
+      description: "backpack: weight per item?",
+      projects: ["Backpack", "Feast"],
+    });
+    // Triage is not Agent Ready: no build and no state change.
+    expect(githubCalls().filter((c) => c.body?.event_type === "factory-build")).toHaveLength(0);
+    expect(stateUpdates()).toEqual([]);
+  });
+
+  it("leaves a Triage ticket that already has an Origin label alone (the factory's own tickets)", async () => {
+    await send(note("triage", ["l-agent"]));
+    expect(writerDispatches()).toHaveLength(0);
+  });
+
+  it("leaves new tickets in other states alone", async () => {
+    await send(note("unstarted", []));
+    expect(writerDispatches()).toHaveLength(0);
+  });
+
+  it("leaves updates alone", async () => {
+    await send(stateChange({ data: { id: "issue-1", state: { type: "triage" } } }));
+    expect(writerDispatches()).toHaveLength(0);
+  });
+
+  it("does nothing without FACTORY_REPO", async () => {
+    await worker.fetch(
+      new Request("https://relay.test/", {
+        method: "POST",
+        headers: { "linear-signature": await sign(JSON.stringify(note("triage", []))) },
+        body: JSON.stringify(note("triage", [])),
+      }),
+      { ...env, FACTORY_REPO: undefined },
+      { waitUntil: (p: Promise<unknown>) => void p.catch(() => {}), passThroughOnException() {} } as any,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(writerDispatches()).toHaveLength(0);
+  });
+
+  it("warns and carries on when the dispatch fails", async () => {
+    githubStatus = 500;
+    await send(note("triage", []));
+    expect(console.error).toHaveBeenCalled();
   });
 });
 

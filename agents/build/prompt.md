@@ -33,5 +33,12 @@ When you are done, write a description of your work to .factory/PR_BODY.md with 
 ## Summary (what changed and why), ## How I tested it (commands and browser checks you ran, and their
 results), ## Risks (anything a reviewer should look at closely, or "None known").
 
+Manual work: never call something manual before you checked that you can't do or confirm it yourself (for
+example read a public repo, call the GitHub or Linear API, run the command). If the ticket can't be
+done without something only Koen can do (an account, a secret, a setting in a dashboard), make NO code changes
+and write .factory/MANUAL_TASKS.json instead: a JSON list of {"title": "...", "why": "...", "steps": ["exact
+step", ...]}. The factory files each as a separate `factory:manual` ticket for Koen that blocks this one.
+Use it only for steps that really are manual; questions about the ticket go in QUESTIONS.md.
+
 If the ticket or feedback is ambiguous, contradicts the code, or can't be done safely, make NO code changes.
 Instead write your specific questions to .factory/QUESTIONS.md and stop. Asking is better than guessing.

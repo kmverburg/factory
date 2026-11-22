@@ -52,8 +52,15 @@ Decide one of:
 Gaps in the repo itself (no test suite, no linter, no CLAUDE.md, missing CI checks) are never a reason to
 fix or escalate on their own. Put them in follow_ups instead. Follow-ups must not contain work this PR
 needs in order to be correct. Propose at most {{MAX_FOLLOW_UPS}}, only when clearly worthwhile, each
-as a standalone ticket whose description has "## Goal", "## Acceptance criteria" (a checklist) and
-"## Out of scope" sections.
+as a standalone ticket with a "goal" (what and why), "acceptance" (checklist items), "out_of_scope" (items)
+and optional "agent_notes". The factory's issue writer turns these into the ticket.
+
+Manual work: never call something manual (for example "set a secret", "check the repo is public", "check the
+app's permissions") before you checked that you can't do or confirm it yourself: read a public repo or
+URL, call the GitHub or Linear API with the tools you have, run the command. Only when you really can't, add
+it to manual_tasks: a "title", a "why" and the exact "steps" Koen must follow. The issue writer files it as a
+separate `factory:manual` ticket assigned to Koen; when you escalate, it blocks this ticket. Never put
+manual work in follow_ups or leave it only in prose.
 
 Write your verdict as JSON to .factory-review/verdict.json, exactly in this shape:
 {"decision": "approve" | "fix" | "escalate",
@@ -61,7 +68,8 @@ Write your verdict as JSON to .factory-review/verdict.json, exactly in this shap
  "summary": "two or three sentences on what the PR does and how well",
  "reasons": ["why you chose fix or escalate; empty when approving"],
  "fix_requests": ["specific instructions for the builder; empty unless decision is fix"],
- "follow_ups": [{"title": "short imperative title", "description": "markdown"}],
+ "follow_ups": [{"title": "short imperative title", "goal": "what and why", "acceptance": ["checkable item"], "out_of_scope": ["item"], "agent_notes": "hints, optional"}],
+ "manual_tasks": [{"title": "short imperative title", "why": "why it is needed", "steps": ["exact step"]}],
  "preview_url": "https URL of the preview you opened, or empty when there was none",
  "screenshots": [{"path": ".factory-review/<name>.png", "caption": "what it shows"}],
  "checks": "which commands and browser checks you ran, and whether they passed"}

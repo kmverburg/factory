@@ -23,6 +23,8 @@ app repo: factory.yml → build.yml (builder agent) → opens PR, issue → "Age
 | `.github/workflows/review.yml` | Reusable reviewer agent workflow |
 | `.github/workflows/sync-caller.yml` | Sends caller workflow changes to the app repos |
 | `.github/workflows/health.yml` | Daily self-check that files "Factory health: …" tickets, see [docs/health-check.md](docs/health-check.md) |
+| `agents/lib/issue-writer.sh`, `agents/issue-writer/` | The issue writer: the one way tickets are created, and rough notes from Koen become proper tickets, see [docs/issue-writer.md](docs/issue-writer.md) |
+| `.github/workflows/issue-writer.yml` | Rewrites rough notes in Triage into proper tickets |
 | `templates/app-repo/` | The two files every app repo needs |
 | `templates/linear-issue-template.md` | Paste into Linear as your issue template |
 
@@ -148,6 +150,14 @@ Each move gets a comment naming the ticket that unblocked it. Tickets with open 
 Two label groups in each Linear team tell you how a ticket came about and how it was delivered. Create them once in Linear (labels with a parent group); the scripts only add them to tickets and warn if one is missing.
 - **Origin** (who had the idea): **Human** is set by the relay on new tickets that have no Origin label. **Agent** is set when the reviewer creates a follow-up ticket and when the log scout creates a ticket (in the same `issueCreate`, so the relay leaves it alone).
 - **Delivery** (did agents do it on their own): **Human involved** is set as soon as a human is needed: the reviewer escalates, the builder asks questions or makes no changes, a build or fix run fails, or the reviewer approves without turning on auto-merge (medium/high risk, repo opted out, PR not opened by the factory, or enabling auto-merge failed). **Autonomous** is set when the reviewer approves and turns on auto-merge. Human involved always wins: it replaces Autonomous, and Autonomous never replaces it. Only one Delivery label is on a ticket, other labels are kept.
+
+## Issue writer
+
+Every ticket the factory creates goes through one shared part, `agents/lib/issue-writer.sh`, so they all look the same (Goal, Acceptance criteria, Out of scope, Agent notes) and follow the same rules for labels (Origin, `factory:manual`, Delivery), assignee (Koen for manual work, nobody for agent work), status (Triage, Todo or Blocked with *blocked by* relations) and deduplication (an open ticket gets a comment instead of a duplicate). The reviewer's follow-ups, the log scout, the caller sync and the health check use it. **Every new part that creates tickets must use it too: this includes deploy watching, which has to be added to the writer's users when it is built.**
+
+- **Manual work** the builder or reviewer can't do or confirm themselves (after checking) becomes its own `factory:manual` ticket assigned to Koen with exact steps. It blocks the original ticket, which waits in Blocked until the relay releases it when the manual ticket is Done.
+- **Rough notes:** a ticket Koen creates in Triage with just a note (`backpack: weight per item?`) is rewritten into a proper ticket in the right project with Origin › Human, with his words kept at the bottom, or gets questions as a comment. The note must name the app; it is never guessed. Needs `FACTORY_REPO` in the relay's `wrangler.jsonc` and the repo secrets `CLAUDE_CODE_OAUTH_TOKEN` and `LINEAR_API_KEY` in this repo.
+- Details: [docs/issue-writer.md](docs/issue-writer.md). Tests: `bash agents/lib/test-issue-writer.sh`, `bash agents/issue-writer/test.sh`.
 
 ## Log scout
 

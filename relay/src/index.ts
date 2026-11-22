@@ -25,6 +25,8 @@ export interface Env {
   TODO_STATE: string;
   AUTO_START_LABEL: string;
   MANUAL_LABEL: string;
+  // Repo (name, or "owner/repo") that runs the issue writer for rough notes in Triage. Without it rough notes are left alone.
+  FACTORY_REPO?: string;
   // GitHub user or organization that owns the repos. Used for PROJECT_REPOS values that are just a repo name.
   GITHUB_OWNER: string;
   // Linear project name -> repo name ("backpack") or "owner/repo".
@@ -88,8 +90,11 @@ export default {
 
     // Answer Linear right away; do the work in the background.
     if (payload.action === "create") {
+      // A new ticket in Triage without an Origin label was typed in by a person: a rough note for the issue writer.
       ctx.waitUntil(
-        labelOrigin(payload.data, env).catch((err) => console.warn("Origin labelling failed", String(err))),
+        labelOrigin(payload.data, env)
+          .then((noOrigin) => (noOrigin && payload.data?.state?.type === "triage" ? dispatchIssueWriter(payload.data, env) : undefined))
+          .catch((err) => console.warn("Origin labelling or issue writer dispatch failed", String(err))),
       );
     }
     ctx.waitUntil(
@@ -396,8 +401,45 @@ async function dispatchBuild(repo: string, payload: unknown, env: Env): Promise<
   return fetch(target.toString(), init);
 }
 
-/** Gives a new issue Origin › Human unless it already has a label from the Origin group. */
-async function labelOrigin(data: any, env: Env): Promise<void> {
+/**
+ * Hands a rough note to the factory repo's issue writer workflow (`factory-issue-writer`), which rewrites it into a
+ * proper ticket or asks questions. The note is data for that agent, never instructions.
+ */
+async function dispatchIssueWriter(data: any, env: Env): Promise<void> {
+  if (!env.FACTORY_REPO) {
+    console.log(`${data.id}: no FACTORY_REPO, leaving the rough note alone`);
+    return;
+  }
+  const issue = await linear<{ issue: { id: string; identifier: string; title: string; description: string | null; project: { name: string } | null } | null }>(
+    `query RoughNote($id: String!) {
+      issue(id: $id) { id identifier title description project { name } }
+    }`,
+    { id: data.id },
+    env,
+  );
+  const note = issue.issue;
+  if (!note) return;
+  const repo = fullRepoName(env.FACTORY_REPO, env.GITHUB_OWNER);
+  const response = await dispatchBuild(repo, {
+    event_type: "factory-issue-writer",
+    client_payload: {
+      issue_id: note.id,
+      identifier: note.identifier,
+      title: note.title,
+      description: (note.description ?? "").slice(0, MAX_DESCRIPTION_CHARS),
+      project: note.project?.name ?? "",
+      projects: Object.keys(env.PROJECT_REPOS ?? {}),
+    },
+  }, env);
+  if (!response.ok) {
+    console.error(`Issue writer dispatch to ${repo} failed`, response.status, await response.text());
+    return;
+  }
+  console.log(`${note.identifier}: rough note sent to the issue writer in ${repo}`);
+}
+
+/** Gives a new issue Origin › Human unless it already has a label from the Origin group. Returns true when it had none. */
+async function labelOrigin(data: any, env: Env): Promise<boolean> {
   const existing: string[] = Array.isArray(data.labelIds) ? data.labelIds : [];
   const found = await linear<{ issueLabels: { nodes: { id: string; name: string }[] } }>(
     `query OriginLabels {
@@ -407,11 +449,11 @@ async function labelOrigin(data: any, env: Env): Promise<void> {
     env,
   );
   const origins = found.issueLabels.nodes;
-  if (origins.some((l) => existing.includes(l.id))) return;
+  if (origins.some((l) => existing.includes(l.id))) return false;
   const human = origins.find((l) => sameName(l.name, "Human"));
   if (!human) {
     console.warn('Label "Origin › Human" not found; leaving the issue unlabelled');
-    return;
+    return true;
   }
   await linear(
     `mutation AddOrigin($id: String!, $labelId: String!) {
@@ -421,6 +463,7 @@ async function labelOrigin(data: any, env: Env): Promise<void> {
     env,
   );
   console.log(`${data.id}: labelled Origin › Human`);
+  return true;
 }
 
 interface BlockedCandidate {
