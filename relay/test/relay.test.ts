@@ -721,3 +721,43 @@ describe("Linear comment commands", () => {
     });
   });
 });
+
+describe("health route", () => {
+  const withSecret: Env = { ...env, HEALTH_CHECK_SECRET: "health-secret" };
+  async function get(path: string, headers: Record<string, string> = {}, e: Env = withSecret) {
+    return worker.fetch(new Request(`https://relay.test${path}`, { headers }) as any, e, { waitUntil() {}, passThroughOnException() {} } as any);
+  }
+
+  it("answers ok on /health and keeps GET / as it was", async () => {
+    expect(await (await get("/health")).json()).toEqual({ ok: true });
+    expect(await (await get("/")).text()).toBe("factory-relay is running");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects the deep check without the right secret, or when none is configured", async () => {
+    expect((await get("/health?deep=1")).status).toBe(401);
+    expect((await get("/health?deep=1", { authorization: "Bearer wrong" })).status).toBe(401);
+    expect((await get("/health?deep=1", { authorization: "Bearer " })).status).toBe(401);
+    expect((await get("/health?deep=1", { authorization: "Bearer health-secret" }, env)).status).toBe(401);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("checks GitHub, every mapped repo and Linear with read-only calls, and reports status codes only", async () => {
+    githubStatus = 200;
+    const res = await get("/health?deep=1", { authorization: "Bearer health-secret" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, github: 200, linear: 200, repos: { "acme/backpack": 200, "acme/feast": 200 } });
+    expect(calls.every((c) => (c.init.method ?? "GET") === "GET" || c.url.includes("linear.app"))).toBe(true);
+    expect(calls.filter((c) => c.url.includes("linear.app")).every((c) => c.body.query.startsWith("query "))).toBe(true);
+  });
+
+  it("answers 503 when GitHub rejects the token, without printing it", async () => {
+    githubStatus = 401;
+    const res = await get("/health?deep=1", { authorization: "Bearer health-secret" });
+    expect(res.status).toBe(503);
+    const text = await res.text();
+    expect(JSON.parse(text).ok).toBe(false);
+    expect(text).not.toContain("gh-token");
+    expect(text).not.toContain("linear-key");
+  });
+});
