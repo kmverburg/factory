@@ -18,7 +18,7 @@ if [ "$EVENT_TYPE" = "factory-build" ]; then
   git checkout -b "$branch"
   printf '# %s: %s\n\n%s\n' "$ISSUE_IDENTIFIER" "$ISSUE_TITLE" "$ISSUE_DESCRIPTION" > .factory/ticket.md
 else
-  pr=$(gh pr view "$PR_NUMBER" --json headRefName,state,body)
+  pr=$(gh pr view "$PR_NUMBER" --json headRefName,baseRefName,state,body)
   if [ "$(jq -r .state <<<"$pr")" != "OPEN" ]; then echo "::error::PR #$PR_NUMBER is not open"; exit 1; fi
   branch=$(jq -r .headRefName <<<"$pr")
   git checkout -B "$branch" "origin/$branch"
@@ -27,7 +27,20 @@ else
   else
     jq -r .body <<<"$pr" > .factory/ticket.md
   fi
-  if [ "$FIX_REQUESTED" = "true" ]; then
+  if [ "$FIX_CONFLICT" = "true" ]; then
+    # Start the merge of the base branch and leave the conflicts in the working tree for the builder (KV-49).
+    base=$(jq -r .baseRefName <<<"$pr")
+    git fetch -q origin "$base"
+    git -c user.name="factory-bot" -c user.email="factory-bot@users.noreply.github.com" merge --no-commit --no-ff "origin/$base" </dev/null >/dev/null 2>&1 || true
+    files=$(git diff --name-only --diff-filter=U || true)
+    {
+      printf 'This PR conflicts with `%s`, and the merge of `origin/%s` is started in the working tree (not committed).\n' "$base" "$base"
+      printf 'Resolve the conflicts so that both sides keep their intent: this PR'"'"'s ticket (.factory/ticket.md) and the\n'
+      printf 'commits that landed on `%s` (listed below). Do not run `git commit`; the workflow commits the merge.\n\n' "$base"
+      printf 'Conflicting files:\n%s\n\n' "${files:-(none: the merge was clean or already done)}"
+      printf 'Commits on `%s` since this branch was cut:\n%s\n' "$base" "$(git log --format='- %h %s%n%b' "$(git merge-base HEAD "origin/$base")..origin/$base" | head -80)"
+    } > .factory/review-feedback.md
+  elif [ "$FIX_REQUESTED" = "true" ]; then
     printf 'Koen asked for these changes in a Linear comment. Do what he says.\n\n%s\n' "$FIX_FEEDBACK" > .factory/review-feedback.md
   else
     printf '%s\n' "$FIX_FEEDBACK" > .factory/review-feedback.md

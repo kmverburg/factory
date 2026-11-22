@@ -1,0 +1,65 @@
+# Keeps agent PRs up to date with their base branch (KV-49). Called from each app repo's factory.yml
+# when the base branch gets a push, and after a review. The logic lives in agents/update/update.sh of the
+# factory repo, fetched at run time from main. Clean updates are pushed; conflicts go to the builder as a fix round.
+name: Factory update
+
+on:
+  workflow_call:
+    inputs:
+      base_branch:
+        description: Branch that moved; every open agent PR targeting it is updated
+        required: false
+        type: string
+        default: ""
+      pr_number:
+        description: Update only this pull request
+        required: false
+        type: string
+        default: ""
+    secrets:
+      FACTORY_APP_ID:
+        required: false
+      FACTORY_APP_PRIVATE_KEY:
+        required: false
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      FACTORY_REPO: ${{ github.repository_owner }}/factory
+      HAS_APP: ${{ secrets.FACTORY_APP_ID != '' }}
+    steps:
+      - name: Fetch factory scripts
+        run: |
+          git clone -q --depth 1 "https://github.com/$FACTORY_REPO.git" "$RUNNER_TEMP/factory"
+          echo "FACTORY_DIR=$RUNNER_TEMP/factory" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The app's pushes start CI and the builder's fix run; the built-in workflow token's don't.
+      - name: Factory app token
+        id: app
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Update agent PRs
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          git remote set-url origin "https://github.com/$GITHUB_REPOSITORY.git"
+          bash "$FACTORY_DIR/agents/update/update.sh"

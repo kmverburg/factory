@@ -11,7 +11,7 @@ if [ -n "$reason" ]; then
 fi
 if [ "$EVENT_TYPE" = "factory-fix" ] && [ -n "$PR_NUMBER" ]; then
   gh pr comment "$PR_NUMBER" --body "💥 The factory fix run failed. Logs: $run_url$detail" || true
-  gh pr edit "$PR_NUMBER" --add-label needs-human || true
+  gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-fixing || true
 fi
 linear_comment "$ISSUE_IDENTIFIER" "💥 The factory build failed. Logs: $run_url$detail"
 linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
