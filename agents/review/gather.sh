@@ -10,7 +10,8 @@ base=$(jq -r .baseRefName .factory-review/pr.json)
 git diff "origin/$base...HEAD" > .factory-review/diff.patch
 echo "base=$base" >> "$GITHUB_OUTPUT"
 # Opened by the builder: labelled agent-built and authored by the factory app or the workflow's bot.
-agent_pr=$(jq -r --arg app "${APP_SLUG:-}" '([.labels[].name] | index("agent-built") != null)
+# A revert PR from the deploy watch (label deploy-revert) is never one: it is never auto-merged or fixed by the builder.
+agent_pr=$(jq -r --arg app "${APP_SLUG:-}" '([.labels[].name] | index("agent-built") != null) and ([.labels[].name] | index("deploy-revert") == null)
   and (.author.login as $a | ($a | test("github-actions")) or ($app != "" and ($a == "app/" + $app or $a == $app + "[bot]")))' .factory-review/pr.json)
 echo "agent_pr=$agent_pr" >> "$GITHUB_OUTPUT"
 

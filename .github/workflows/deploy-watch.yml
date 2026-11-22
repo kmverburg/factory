@@ -1,0 +1,65 @@
+# Deploy watch (agents/watch/, docs/deploy-watch.md): an hour after an app's merge to main is deployed, compares
+# production for that hour with the 24 hours before it. Normal -> a comment on the ticket; clearly worse -> a revert
+# PR (never merged automatically) and a Needs Human ticket. Can also be started by hand; "dry run" only prints the
+# comparison for the deploys of the last 24 hours and opens nothing.
+name: Deploy watch
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (only print the comparison, don't comment, create tickets or open PRs)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check secrets
+        env:
+          CLOUDFLARE_OBSERVABILITY_TOKEN: ${{ secrets.CLOUDFLARE_OBSERVABILITY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          missing=0
+          for name in CLOUDFLARE_OBSERVABILITY_TOKEN CLOUDFLARE_ACCOUNT_ID LINEAR_API_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repo secret $name (set it in Infisical, see the README's Secrets section)"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      # No `repositories` filter: one token for every repo the factory app is installed on.
+      - name: Factory app token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Watch the deploys
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          CLOUDFLARE_OBSERVABILITY_TOKEN: ${{ secrets.CLOUDFLARE_OBSERVABILITY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+        run: bash agents/watch/watch.sh

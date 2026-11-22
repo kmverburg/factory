@@ -177,6 +177,10 @@ Every ticket the factory creates goes through one shared part, `agents/lib/issue
 - **When it runs:** `.github/workflows/scout.yml` runs it every day at 05:00 UTC (06:00 in winter, 07:00 in summer in Amsterdam), for every app in `apps.json` (Backpack and Feast); that run is the weekly one on Mondays. It needs the repo secrets `CLOUDFLARE_OBSERVABILITY_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `LINEAR_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`; a missing one fails the run with an error naming it. The run also fails if an app's logs can't be read or its Linear project isn't found. Claude's process doesn't get the Cloudflare or Linear values. A second run on the same Monday posts a second report.
 - **Dry run:** GitHub → Actions → *Log scout* → *Run workflow*, keep **Dry run** ticked. It prints what it would create and doesn't touch Linear. Untick it to run for real.
 
+## Deploy watch
+
+An hour after an app deploys a merge to `main`, the factory compares production with the 24 hours before (error rate, 5xx rate, request time). If it clearly got worse, it opens a revert PR (never auto-merged) and a Needs Human ticket; otherwise it comments that all is normal. Details and settings: [docs/deploy-watch.md](docs/deploy-watch.md).
+
 ## Changing the GitHub owner
 The factory and the app repos moved from the personal account `kverburg` to `kmverburg` (the owner of this repo). Old links redirect, but nothing here should name the old account any more.
 

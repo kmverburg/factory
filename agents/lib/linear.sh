@@ -136,3 +136,8 @@ linear_set_description() {
     "$(jq -n --arg id "$1" --arg d "$2" '{id: $id, d: $d}')" >/dev/null \
     || echo "::warning::Linear description update failed"
 }
+# $1 = issue identifier or id. Prints the issue's comment bodies as a JSON array of strings (the first 100), or nothing.
+linear_issue_comment_bodies() {
+  linear_gql 'query($id: String!) { issue(id: $id) { comments(first: 100) { nodes { body } } } }' \
+    "$(jq -n --arg id "$1" '{id: $id}')" | jq -c '.data.issue.comments.nodes | map(.body)'
+}

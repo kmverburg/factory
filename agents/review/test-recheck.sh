@@ -43,4 +43,5 @@ check "fix round already running" "|" "$(run "ci" "$(pr '[{"name":"agent-built"}
 check "auto-merge on: review starts" "7|0" "$(run "ci" "$(pr "$built" "$none" '{"mergeMethod":"SQUASH"}')" 7)"
 check "auto-merge cancelled" 1 "$(grep -c 'pr merge 7 --disable-auto' "$tmp/gh.log" || true)"
 check "auto-merge cancelled even while fixing" 1 "$(run "ci" "$(pr '[{"name":"agent-built"},{"name":"agent-fixing"}]' "$none" '{"mergeMethod":"SQUASH"}')" 7 >/dev/null; grep -c 'disable-auto' "$tmp/gh.log" || true)"
+check "deploy-watch revert is never re-reviewed" "|" "$(run "ci" "$(pr '[{"name":"agent-built"},{"name":"deploy-revert"}]' "$none" null)" 7)"
 exit $fail
