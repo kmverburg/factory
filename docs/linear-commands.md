@@ -10,21 +10,20 @@ The relay's GitHub token needs *Pull requests: Read* (to find the ticket's PR) n
 
 ## Commands
 
-The first word of the comment decides. Case doesn't matter.
+Only a comment that is exactly `approve` or `/approve` approves (case, surrounding spaces and a trailing full stop don't matter). Longer comments are never approval, whatever word they start with: "Merge conflict, solve that" is a change request.
 
 | Comment | When | What happens |
 | --- | --- | --- |
-| `approve` or `merge` (anything after it is ignored) | The ticket's agent PR is open | A `factory-approve` event starts the *Factory approve* workflow. It waits for the PR's required checks, then squash-merges and deletes the branch with the factory app's token. The ticket gets a comment when it's merged, or why it wasn't (a failing check, checks still running after 30 minutes, a merge GitHub refused). |
-| `change …` or `fix …` | The ticket's agent PR is open | The rest of the comment goes to the builder as instructions (a `factory-fix` event with `requested: true`). The reviewer checks the result as usual. These rounds don't count towards the automatic 2-round limit, and the next automatic count starts from 0. |
+| `approve` or `/approve` (nothing else) | The ticket's agent PR is open | A `factory-approve` event starts the *Factory approve* workflow. It waits for the PR's required checks, then squash-merges and deletes the branch with the factory app's token. The ticket gets a comment when it's merged, or why it wasn't (a failing check, checks still running after 30 minutes, a merge GitHub refused). Confirmation: "🏭 👍 Approving … once checks pass". |
+| Any other comment | The ticket's agent PR is open | The whole comment goes to the builder as instructions (a `factory-fix` event with `requested: true`), e.g. `approve but rename the button`. The reviewer checks the result as usual. These rounds don't count towards the automatic 2-round limit, and the next automatic count starts from 0. Confirmation: "🏭 🔧 Sending your comment to the builder as a fix round …". |
 | Any comment | The ticket is in **Needs Human** and has no open PR (the builder asked questions) | The comment is added to the ticket description under `## Answers from Koen` (later answers are appended) and the ticket moves to **Agent Ready**, so the builder continues with it. |
 
-Every command gets a short confirmation comment from the relay within seconds. Anything else is ignored: a comment that doesn't start with a command word on a ticket that isn't waiting for an answer, edits and deletions of comments, and comments on tickets in projects the relay doesn't know.
+Every approval and change request gets a short confirmation comment from the relay within seconds. Ignored: factory comments, empty comments, edits and deletions of comments, comments on tickets in projects the relay doesn't know, and comments on a ticket with no open PR that aren't `approve` (a plain `approve` there gets a reply saying there is no PR). A change request on a PR without the `agent-built` label is ignored silently; `approve` on it is refused with an explanation.
 
 ## Rules
 
 - **Factory comments are never commands.** Every comment the factory writes starts with one of 🏭 🔧 ✅ 🙋 💥 🤔, and the relay ignores comments that start with one. Keep this in mind when adding a new kind of comment: start it with a marker.
 - **Only the factory's own PRs.** The PR must have the `agent-built` label, and is found by its branch name starting with the ticket identifier (`kv-45-…`, which is how the builder names it). Approving or changing any other PR is refused with an explanation.
-- A command on a ticket without an open PR gets a reply saying so.
 - Anyone who can comment on a ticket in a mapped project can give commands, so keep the workspace to people who may merge.
 
 ## Where it lives
