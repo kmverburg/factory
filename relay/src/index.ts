@@ -120,13 +120,15 @@ const ANSWERS_HEADING = "## Answers from Koen";
 
 type Command = { kind: "approve" } | { kind: "change"; instructions: string };
 
-/** "approve" or "merge" approves; "change" or "fix" asks for changes with the rest as instructions. Otherwise null. */
+/**
+ * A comment that is only "approve" or "/approve" (any case, surrounding spaces, optional trailing full stop) approves.
+ * Every other comment is a change request with the whole comment as instructions, so "Merge conflict, solve that"
+ * can never merge anything. Null for an empty comment.
+ */
 function parseCommand(body: string): Command | null {
-  const match = /^\s*(approve[ds]?|merge[ds]?|changes?|fix(?:es)?)\b[\s:,.!-]*([\s\S]*)$/i.exec(body);
-  if (!match) return null;
-  const word = match[1].toLowerCase();
-  if (word.startsWith("approve") || word.startsWith("merge")) return { kind: "approve" };
-  return { kind: "change", instructions: match[2].trim() };
+  if (/^\s*\/?approve\s*\.?\s*$/i.test(body)) return { kind: "approve" };
+  const instructions = body.trim();
+  return instructions ? { kind: "change", instructions } : null;
 }
 
 interface PullRequest {
@@ -160,7 +162,7 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
   const issue = await getIssue(data.issueId, env);
   if (!issue) return;
   const awaitingAnswer = sameName(issue.state.name, env.NEEDS_HUMAN_STATE);
-  if (!command && !awaitingAnswer) return;
+  if (!command) return;
 
   const mapped = issue.project?.name ? findRepo(issue.project.name, env.PROJECT_REPOS) : undefined;
   if (!mapped) {
@@ -174,22 +176,22 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
     pr = await findOpenPr(repo, issue.identifier, env);
   } catch (err) {
     console.error(`${issue.identifier}: PR lookup failed`, String(err));
-    if (command) await addComment(issue.id, `🏭 Couldn't look up the pull request for this ticket. ${String(err instanceof Error ? err.message : err)}`, env);
+    if (command.kind === "approve") await addComment(issue.id, `🏭 Couldn't look up the pull request for this ticket. ${String(err instanceof Error ? err.message : err)}`, env);
     return;
   }
 
   if (!pr) {
     if (awaitingAnswer) return answerQuestions(issue, body, env);
-    if (command) {
-      await addComment(issue.id, `🏭 Can't ${command.kind === "approve" ? "approve" : "change"} anything: there is no open pull request for ${issue.identifier} in \`${repo}\`.`, env);
+    // Only an explicit approve gets a reply; ordinary comments on a ticket without a PR are just conversation.
+    if (command.kind === "approve") {
+      await addComment(issue.id, `🏭 Can't approve anything: there is no open pull request for ${issue.identifier} in \`${repo}\`.`, env);
     }
     return;
   }
-  if (!command) return;
 
-  const verb = command.kind === "approve" ? "approve" : "change";
   if (!pr.labels.some((l) => l.name === "agent-built")) {
-    await addComment(issue.id, `🏭 Can't ${verb} ${pr.html_url}: it isn't a factory PR (no \`agent-built\` label), and the factory only merges or changes its own PRs.`, env);
+    if (command.kind !== "approve") return;
+    await addComment(issue.id, `🏭 Can't approve ${pr.html_url}: it isn't a factory PR (no \`agent-built\` label), and the factory only merges its own PRs.`, env);
     return;
   }
 
@@ -203,14 +205,10 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
       await addComment(issue.id, `🏭 Couldn't start the merge of ${pr.html_url}: ${dispatchFailureMessage(repo, response.status)}`, env);
       return;
     }
-    await addComment(issue.id, `🏭 Got it: approving ${pr.html_url}. It merges (squash) once its required checks pass, and I'll say here when it has.`, env);
+    await addComment(issue.id, `🏭 👍 Approving ${pr.html_url} once checks pass. It merges (squash), and I'll say here when it has.`, env);
     return;
   }
 
-  if (!command.instructions) {
-    await addComment(issue.id, `🏭 Say what to change, for example \`change: make the button blue\`. Nothing was sent to the builder.`, env);
-    return;
-  }
   const response = await dispatchBuild(repo, {
     event_type: "factory-fix",
     client_payload: {
@@ -226,7 +224,7 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
     await addComment(issue.id, `🏭 Couldn't start a fix round on ${pr.html_url}: ${dispatchFailureMessage(repo, response.status)}`, env);
     return;
   }
-  await addComment(issue.id, `🏭 Got it: the builder is applying your changes to ${pr.html_url}. This round doesn't count towards the automatic limit.`, env);
+  await addComment(issue.id, `🏭 🔧 Sending your comment to the builder as a fix round on ${pr.html_url}. This round doesn't count towards the automatic limit.`, env);
 }
 
 /** The builder asked questions and there is no PR yet: put the comment in the description and send the ticket back to the builder. */

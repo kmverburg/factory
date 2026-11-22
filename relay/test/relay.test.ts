@@ -571,7 +571,7 @@ describe("Linear comment commands", () => {
   });
 
   it("approves: dispatches factory-approve and confirms", async () => {
-    for (const word of ["approve", "Approved!", "merge", "  MERGE it"]) {
+    for (const word of ["approve", "/approve", "Approve.", "  /APPROVE . "]) {
       calls = [];
       const res = await send(comment(word));
       expect(res.status).toBe(202);
@@ -582,7 +582,7 @@ describe("Linear comment commands", () => {
         client_payload: { pr_number: "7", identifier: "KOE-1" },
       });
       expect(comments()).toHaveLength(1);
-      expect(comments()[0]).toMatch(/^🏭 Got it: approving/);
+      expect(comments()[0]).toMatch(/^🏭 👍 Approving .* once checks pass/);
     }
   });
 
@@ -596,33 +596,39 @@ describe("Linear comment commands", () => {
         round: "0",
         requested: "true",
         identifier: "KOE-1",
-        feedback: "make the button blue\nand bigger",
+        feedback: "change: make the button blue\nand bigger",
       },
     });
-    expect(comments()[0]).toMatch(/^🏭 Got it: the builder is applying your changes/);
-    expect(comments()[0]).toContain("doesn't count");
+    expect(comments()[0]).toMatch(/^🏭 🔧 Sending your comment to the builder as a fix round/);
   });
 
-  it("accepts fix as well as change", async () => {
-    await send(comment("Fix the typo in the header"));
-    expect(dispatches()[0].body.client_payload.feedback).toBe("the typo in the header");
+  it("treats any other comment as a fix round with the whole comment as instructions", async () => {
+    for (const text of ["Merge conflict, solve that", "approve but rename the button", "Fix the typo in the header", "Can you approve this?", "/approve it", "merge"]) {
+      calls = [];
+      await send(comment(text));
+      expect(dispatches()).toHaveLength(1);
+      expect(dispatches()[0].body.event_type).toBe("factory-fix");
+      expect(dispatches()[0].body.client_payload.feedback).toBe(text);
+      expect(comments()[0]).toMatch(/^🏭 🔧 Sending your comment to the builder as a fix round/);
+    }
   });
 
-  it("doesn't send an empty change request", async () => {
-    await send(comment("change"));
+  it("ignores an empty comment", async () => {
+    await send(comment("   "));
     expect(dispatches()).toHaveLength(0);
-    expect(comments()[0]).toMatch(/^🏭 Say what to change/);
+    expect(comments()).toHaveLength(0);
   });
 
   it("refuses to approve or change a PR that isn't the factory's", async () => {
     pulls = [agentPr({ labels: [] })];
-    for (const word of ["approve", "change: x"]) {
-      calls = [];
-      await send(comment(word));
-      expect(dispatches()).toHaveLength(0);
-      expect(comments()).toHaveLength(1);
-      expect(comments()[0]).toContain("isn't a factory PR");
-    }
+    await send(comment("approve"));
+    expect(dispatches()).toHaveLength(0);
+    expect(comments()).toHaveLength(1);
+    expect(comments()[0]).toContain("isn't a factory PR");
+    calls = [];
+    await send(comment("change: x"));
+    expect(dispatches()).toHaveLength(0);
+    expect(comments()).toHaveLength(0);
   });
 
   it("says so when the ticket has no open PR", async () => {
@@ -654,8 +660,9 @@ describe("Linear comment commands", () => {
     }
   });
 
-  it("ignores comments that aren't commands", async () => {
-    for (const text of ["looks good to me", "Can you approve this?", "prefix the title", "unfixed"]) {
+  it("ignores ordinary comments on a ticket without an open PR", async () => {
+    pulls = [];
+    for (const text of ["looks good to me", "Merge conflict, solve that"]) {
       calls = [];
       await send(comment(text));
       expect(dispatches()).toHaveLength(0);
@@ -715,9 +722,11 @@ describe("Linear comment commands", () => {
       pulls = [agentPr()];
       await send(comment("thanks, will look"));
       expect(issueUpdates()).toHaveLength(0);
-      expect(comments()).toHaveLength(0);
-      await send(comment("approve"));
       expect(dispatches()).toHaveLength(1);
+      expect(dispatches()[0].body.event_type).toBe("factory-fix");
+      await send(comment("approve"));
+      expect(dispatches()).toHaveLength(2);
+      expect(dispatches()[1].body.event_type).toBe("factory-approve");
     });
   });
 });
