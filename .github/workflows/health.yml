@@ -1,0 +1,61 @@
+# Daily factory health check (agents/health/, docs/health-check.md): checks the relay, GitHub, Cloudflare, Linear,
+# the secrets and the real Linear queries, and files one "Factory health: …" ticket per failed check in the
+# Factory project. Can also be started by hand; "dry run" only prints the results.
+name: Factory health check
+
+on:
+  schedule:
+    # 04:30 UTC, before the log scout (05:00).
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (only print the results, don't create or update tickets)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-health
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # No `repositories` filter: one token for every repo the factory app is installed on. A failure here is
+      # reported by the check itself (APP_TOKEN_OUTCOME), so the run goes on.
+      - name: Factory app token
+        id: app
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      # The checks only ever print status codes and names, never secret values.
+      - name: Run the health check
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_TOKEN_OUTCOME: ${{ steps.app.outcome }}
+          FACTORY_REPO: ${{ github.repository }}
+          RELAY_URL: https://relay.kmverburg.nl
+          HEALTH_CHECK_SECRET: ${{ secrets.HEALTH_CHECK_SECRET }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_BUILDS_TOKEN: ${{ secrets.CLOUDFLARE_BUILDS_TOKEN }}
+          CLOUDFLARE_OBSERVABILITY_TOKEN: ${{ secrets.CLOUDFLARE_OBSERVABILITY_TOKEN }}
+          FACTORY_APP_ID: ${{ secrets.FACTORY_APP_ID }}
+          FACTORY_APP_PRIVATE_KEY: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+        run: bash agents/health/health.sh

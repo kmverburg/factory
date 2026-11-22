@@ -166,3 +166,9 @@ linear_upload_image() {
   if curl -sS --fail -X PUT "${args[@]}" --data-binary @"$1" "$url" >/dev/null; then echo "$asset"
   else echo "::warning::Uploading $1 to Linear failed" >&2; fi
 }
+# $1 = issue uuid, $2 = new description (markdown). Warns instead of failing.
+linear_set_description() {
+  linear_gql 'mutation($id: String!, $d: String!) { issueUpdate(id: $id, input: { description: $d }) { success } }' \
+    "$(jq -n --arg id "$1" --arg d "$2" '{id: $id, d: $d}')" >/dev/null \
+    || echo "::warning::Linear description update failed"
+}

@@ -14,6 +14,8 @@ export interface Env {
   LINEAR_API_KEY: string;
   LINEAR_WEBHOOK_SECRET: string;
   GITHUB_TOKEN: string;
+  // Shared with the daily health check (docs/health-check.md). Optional: without it the deep health check is off.
+  HEALTH_CHECK_SECRET?: string;
 
   // Plain vars (set in wrangler.jsonc)
   AGENT_READY_STATE: string;
@@ -47,6 +49,8 @@ const MAX_WEBHOOK_AGE_MS = 5 * 60 * 1000;
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     if (request.method === "GET") {
+      const url = new URL(request.url);
+      if (url.pathname === "/health") return healthCheck(request, url, env);
       return new Response("factory-relay is running");
     }
     if (request.method !== "POST") {
@@ -99,6 +103,52 @@ export default {
     return new Response("Accepted", { status: 202 });
   },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * GET /health answers "ok" to anyone. GET /health?deep=1 needs `Authorization: Bearer <HEALTH_CHECK_SECRET>`
+ * and makes one read-only call each to GitHub (the relay's token, and each repo in PROJECT_REPOS) and Linear.
+ * It reports status codes only, never a token.
+ */
+async function healthCheck(request: Request, url: URL, env: Env): Promise<Response> {
+  if (url.searchParams.get("deep") !== "1") return Response.json({ ok: true });
+
+  const secret = env.HEALTH_CHECK_SECRET;
+  const given = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? "";
+  if (!secret || !(await sameSecret(given, secret))) return new Response("Unauthorized", { status: 401 });
+
+  const status = async (call: () => Promise<Response>): Promise<number> => {
+    try {
+      return (await call()).status;
+    } catch {
+      return 0;
+    }
+  };
+  const github = (path: string) => status(() => fetch(`https://api.github.com${path}`, { headers: githubHeaders(env) }));
+  const repos: Record<string, number> = {};
+  for (const mapped of new Set(Object.values(env.PROJECT_REPOS))) {
+    const repo = fullRepoName(mapped, env.GITHUB_OWNER);
+    repos[repo] = await github(`/repos/${repo}`);
+  }
+  const linearStatus = await status(() =>
+    fetch(LINEAR_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: env.LINEAR_API_KEY },
+      body: JSON.stringify({ query: `query Health { viewer { id } }` }),
+    }),
+  );
+  const githubToken = await github("/rate_limit");
+  const ok = githubToken === 200 && linearStatus === 200 && Object.values(repos).every((s) => s === 200);
+  return Response.json({ ok, github: githubToken, linear: linearStatus, repos }, { status: ok ? 200 : 503 });
+}
+
+/** Compares two secrets without leaking where they differ (both are hashed first, so the lengths match). */
+async function sameSecret(a: string, b: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const [ha, hb] = await Promise.all(
+    [a, b].map(async (v) => new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(v)))),
+  );
+  return crypto.subtle.timingSafeEqual(ha, hb);
+}
 
 /** True for newly created issues and for updates that changed the state. */
 function isIssueStateEvent(payload: any): boolean {

@@ -10,6 +10,7 @@ The software factory itself. Linear issues in "Agent Ready" go through the relay
 - `.github/workflows/factory.yml`: this repo's own caller, so the factory can build itself.
 - `agents/sync/`: `sync-caller.sh` (run by `.github/workflows/sync-caller.yml`) opens "Update factory caller workflow" PRs in every app repo in `PROJECT_REPOS` when the template caller changes. Test: `bash agents/sync/test.sh`.
 - `agents/approve/`: `approve.sh` merges an agent PR on a Linear "approve" comment (`.github/workflows/approve.yml`). Test: `bash agents/approve/test.sh`. The relay's comment commands are described in `docs/linear-commands.md`.
+- `agents/health/`: the daily factory health check (`health.sh`, `checks.sh`; run by `.github/workflows/health.yml`). Files "Factory health: …" tickets. Test: `bash agents/health/test.sh`. See `docs/health-check.md`. New Linear queries are picked up by themselves; a new query variable needs a sample value in `check_linear_queries`.
 - `templates/`: files to copy into a new app repo.
 
 Everything in `agents/` goes live for **all** app repos as soon as it's merged to `main`. A PR's own changes are never used to review that PR.

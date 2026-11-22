@@ -22,6 +22,7 @@ app repo: factory.yml → build.yml (builder agent) → opens PR, issue → "Age
 | `.github/workflows/build.yml` | Reusable builder agent workflow |
 | `.github/workflows/review.yml` | Reusable reviewer agent workflow |
 | `.github/workflows/sync-caller.yml` | Sends caller workflow changes to the app repos |
+| `.github/workflows/health.yml` | Daily self-check that files "Factory health: …" tickets, see [docs/health-check.md](docs/health-check.md) |
 | `templates/app-repo/` | The two files every app repo needs |
 | `templates/linear-issue-template.md` | Paste into Linear as your issue template |
 
@@ -84,6 +85,7 @@ All secrets live in one Infisical project, `factory`, environment `prod`. There 
 | `CLOUDFLARE_BUILDS_TOKEN` | Read-only token that lets the reviewer read Cloudflare build results ([KOE-15](https://linear.app/koenv/issue/KOE-15/treat-failing-ci-checks-on-agent-prs-as-something-to-fix)) | `/github/factory` → app repos |
 | `CLOUDFLARE_OBSERVABILITY_TOKEN` | Read-only token that lets the log scout read Workers Logs ([KOE-17](https://linear.app/koenv/issue/KOE-17/log-scout-turn-app-errors-into-linear-tickets)) | `/github/factory` → factory repo |
 | `LINEAR_WEBHOOK_SECRET` | Verifies that webhooks really come from Linear | `/cloudflare/factory-relay` → `factory` Worker |
+| `HEALTH_CHECK_SECRET` | Lets the daily health check ask the relay whether its GitHub token works ([docs/health-check.md](docs/health-check.md)) | `/cloudflare/factory-relay` → `factory` Worker, and the same value in the folder synced to the factory repo |
 | `GITHUB_TOKEN` (relay) | Lets the relay start builds in the app repos | `/cloudflare/factory-relay` → `factory` Worker |
 
 ### Local development
