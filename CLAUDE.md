@@ -9,6 +9,7 @@ The software factory itself. Linear issues in "Agent Ready" go through the relay
 - `.github/workflows/build.yml` and `review.yml`: thin reusable workflows that every app repo calls. They fetch `agents/` from `main` at run time.
 - `.github/workflows/factory.yml`: this repo's own caller, so the factory can build itself.
 - `agents/sync/`: `sync-caller.sh` (run by `.github/workflows/sync-caller.yml`) opens "Update factory caller workflow" PRs in every app repo in `PROJECT_REPOS` when the template caller changes. Test: `bash agents/sync/test.sh`.
+- `agents/update/`: `update.sh` (run by `.github/workflows/update.yml`, called from the caller's `push` to `main` and after each review) merges the base branch into open agent PRs, or sends conflicts to the builder as a `factory-fix` event with `conflict: true` (not counted as a round). Test: `bash agents/update/test.sh`.
 - `agents/approve/`: `approve.sh` merges an agent PR on a Linear "approve" comment (`.github/workflows/approve.yml`). Test: `bash agents/approve/test.sh`. The relay's comment commands are described in `docs/linear-commands.md`.
 - `templates/`: files to copy into a new app repo.
 

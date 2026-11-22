@@ -8,8 +8,8 @@ gh label create needs-human --color D93F0B --description "Factory wants a human 
 if [ -s .factory/QUESTIONS.md ]; then
   questions=$(cat .factory/QUESTIONS.md)
   if [ "$EVENT_TYPE" = "factory-fix" ]; then
-    gh pr comment "$PR_NUMBER" --body "$(printf '🤔 The builder agent needs input before it can apply the review fixes:\n\n%s' "$questions")"
-    gh pr edit "$PR_NUMBER" --add-label needs-human
+    gh pr comment "$PR_NUMBER" --body "$(printf '🤔 The builder agent needs input before it can apply the fixes:\n\n%s' "$questions")"
+    gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-fixing
   fi
   linear_comment "$ISSUE_IDENTIFIER" "$(printf '🤔 The builder agent needs input:\n\n%s\n\nUpdate the ticket, then move it back to **Agent Ready**.' "$questions")"
   linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
@@ -23,10 +23,21 @@ rm -rf .factory
 
 if [ "$EVENT_TYPE" = "factory-build" ]; then
   message="$ISSUE_IDENTIFIER: $ISSUE_TITLE"
+elif [ "$FIX_CONFLICT" = "true" ]; then
+  message="$ISSUE_IDENTIFIER: merge the base branch and resolve conflicts"
 elif [ "$FIX_REQUESTED" = "true" ]; then
   message="$ISSUE_IDENTIFIER: apply the changes Koen asked for"
 else
   message="$ISSUE_IDENTIFIER: address review feedback (round $FIX_ROUND)"
+fi
+# A merge-conflict fix must not push conflict markers.
+if [ "$FIX_CONFLICT" = "true" ] && git diff --name-only --diff-filter=U | xargs -r grep -lE '^<<<<<<< ' >/dev/null 2>&1; then
+  gh pr comment "$PR_NUMBER" --body "🏭 The builder agent left merge conflict markers in place, so nothing was pushed. Run: $run_url"
+  gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-fixing
+  linear_comment "$ISSUE_IDENTIFIER" "🏭 The builder agent couldn't resolve the merge conflicts on the pull request. Run: $run_url"
+  linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
+  linear_set_group_label "$ISSUE_IDENTIFIER" Delivery "Human involved"
+  exit 0
 fi
 git add -A
 if ! git diff --cached --quiet; then
@@ -35,7 +46,7 @@ fi
 if [ "$(git rev-list --count "$BASE_SHA"..HEAD)" = "0" ]; then
   if [ "$EVENT_TYPE" = "factory-fix" ]; then
     gh pr comment "$PR_NUMBER" --body "🏭 The builder agent couldn't apply the review fixes (no changes). Run: $run_url"
-    gh pr edit "$PR_NUMBER" --add-label needs-human
+    gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-fixing
   fi
   linear_comment "$ISSUE_IDENTIFIER" "🏭 The builder agent finished without changing any code. Run: $run_url"
   linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
@@ -67,10 +78,13 @@ if [ "$EVENT_TYPE" = "factory-build" ]; then
 else
   git push origin "$BRANCH"
   pr_number="$PR_NUMBER"
-  if [ "$FIX_REQUESTED" = "true" ]; then fix_title="Builder applied the changes Koen asked for"; else fix_title="Builder applied review fixes (round $FIX_ROUND)"; fi
+  if [ "$FIX_CONFLICT" = "true" ]; then fix_title="Builder resolved merge conflicts with the base branch"
+  elif [ "$FIX_REQUESTED" = "true" ]; then fix_title="Builder applied the changes Koen asked for"; else fix_title="Builder applied review fixes (round $FIX_ROUND)"; fi
   { echo "### 🔧 $fix_title"; echo; cat "$body_file"; } > "$RUNNER_TEMP/fix_comment.md"
   gh pr comment "$pr_number" --body-file "$RUNNER_TEMP/fix_comment.md"
-  if [ "$FIX_REQUESTED" = "true" ]; then
+  if [ "$FIX_CONFLICT" = "true" ]; then
+    linear_comment "$ISSUE_IDENTIFIER" "🔧 Builder resolved the merge conflicts with the base branch and pushed. The reviewer agent is checking again."
+  elif [ "$FIX_REQUESTED" = "true" ]; then
     linear_comment "$ISSUE_IDENTIFIER" "🔧 Builder pushed the changes you asked for. The reviewer agent is checking again."
   else
     linear_comment "$ISSUE_IDENTIFIER" "🔧 Builder pushed fixes for round $FIX_ROUND. The reviewer agent is checking again."
