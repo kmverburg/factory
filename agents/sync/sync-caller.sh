@@ -14,6 +14,8 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd "$here/../.." && pwd)
 # shellcheck source=../lib/linear.sh
 source "$root/agents/lib/linear.sh"
+# shellcheck source=../lib/issue-writer.sh
+source "$root/agents/lib/issue-writer.sh"
 template=${TEMPLATE:-$root/templates/app-repo/.github/workflows/factory.yml}
 config=${WRANGLER_CONFIG:-$root/relay/wrangler.jsonc}
 path=.github/workflows/factory.yml
@@ -40,28 +42,18 @@ repos() {
 
 # $1 = project name. Creates the Linear ticket for a sync PR and prints "IDENTIFIER url", or nothing (with a warning).
 create_ticket() {
-  local ctx team_id project_id state_id labels origin human desc input created
-  ctx=$(linear_project_context "$1" 2>/dev/null) || ctx=""
-  team_id=$(jq -r '.team.id // empty' <<<"$ctx" 2>/dev/null) || team_id=""
-  project_id=$(jq -r '.id // empty' <<<"$ctx" 2>/dev/null) || project_id=""
-  if [ -z "$team_id" ]; then echo "::warning::Linear project '$1' not found or Linear unreachable; no ticket for $repo" >&2; return 0; fi
-  state_id=$(jq -r '[.team.states.nodes[] | select((.name | ascii_downcase) == "needs human")][0].id // empty' <<<"$ctx")
-  labels=$(jq -c '.team.labels.nodes // []' <<<"$ctx")
-  origin=$(linear_group_label_id "$labels" Origin Agent)
-  human=$(linear_group_label_id "$labels" Delivery "Human involved")
-  [ -n "$state_id" ] || echo "::warning::Linear state 'Needs Human' not found for project '$1'" >&2
-  [ -n "$origin" ] && [ -n "$human" ] || echo "::warning::Linear labels 'Origin › Agent' or 'Delivery › Human involved' not found for project '$1'" >&2
-  desc="The factory's caller workflow template changed in $FACTORY_REPO${trigger_id:+ ($trigger_id)}, so \`$path\` in \`$repo\` has to change too. The factory opened a pull request that syncs it; the leading comment lines of the file are kept.
-
-The PR touches \`.github/\`, so the factory reviewer always escalates it and it needs a human to approve and merge it. Merging the PR moves this ticket to Done."
-  input=$(jq -n --arg t "$team_id" --arg ti "$ticket_title" --arg d "$desc" --arg s "$state_id" --arg o "$origin" --arg h "$human" --arg p "$project_id" \
-    '{teamId: $t, title: $ti, description: $d}
-     + (if $s != "" then {stateId: $s} else {} end)
-     + {labelIds: ([$o, $h] | map(select(. != "")))}
-     + (if $p != "" then {projectId: $p} else {} end)')
-  created=$(linear_create_issue "$input" 2>/dev/null) || created=""
-  if [ -z "$created" ]; then echo "::warning::Could not create the Linear ticket for $repo" >&2; fi
-  echo "$created"
+  local spec out
+  spec=$(jq -n --arg p "$1" --arg ti "$ticket_title" --arg repo "$repo" --arg path "$path" --arg f "$FACTORY_REPO" --arg trig "${trigger_id:-}" '
+    {project: $p, title: $ti, origin: "Agent", delivery: "Human involved", state: "needs human",
+     goal: ("The factory caller workflow template changed in " + $f + (if $trig != "" then " (" + $trig + ")" else "" end) + ", so `" + $path + "` in `" + $repo + "` has to change too. The factory opened a pull request that syncs it; the leading comment lines of the file are kept."),
+     acceptance: ["The sync pull request is reviewed and merged (merging it moves this ticket to Done)."],
+     out_of_scope: ["Changing the template itself."],
+     agent_notes: "The PR touches `.github/`, so the factory reviewer always escalates it and it needs a human to approve and merge it."}')
+  out=$(issue_write "$spec" 2>/dev/null) || out=""
+  case "$out" in
+    "created "*) echo "${out#created }" ;;
+    *) echo "::warning::Could not create the Linear ticket for $repo" >&2 ;;
+  esac
 }
 
 sync_repo() {

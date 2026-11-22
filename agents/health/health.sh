@@ -12,6 +12,8 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$here/../.." && pwd)
 # shellcheck source=../lib/linear.sh
 source "$here/../lib/linear.sh"
+# shellcheck source=../lib/issue-writer.sh
+source "$here/../lib/issue-writer.sh"
 # shellcheck source=checks.sh
 source "$here/checks.sh"
 [ "$1" = "--dry-run" ] && DRY_RUN=1
@@ -48,28 +50,24 @@ print_results() {
   jq -r 'if .ok then "ok    \(.id)" else "FAIL  \(.id): \(.title)\n\(.message)" end' "$RESULTS"
 }
 
-# $1 = result JSON. Prints the ticket description.
-ticket_body() {
-  jq -r --arg d "$TODAY" '
-    "Found by the daily factory health check (`agents/health/`, see `docs/health-check.md`). Fixing it is up to this ticket; the check only reports.\n\n"
-    + "### What is wrong\n\(.message)\n### How to fix\n\(.fix)\n\n"
-    + "Health check: `\(.id)`\nHealth status: failing (checked \($d))"' <<<"$1"
+# $1 = result JSON. Prints the issue writer's spec for the ticket. The footer holds the marker the check finds the ticket by.
+ticket_spec() {
+  jq -c --arg d "$TODAY" --arg l "$LABEL" '
+    {title: "Factory health: \(.title)", origin: "Agent", state: "todo", labels: [$l],
+     goal: "The daily factory health check (`agents/health/`, see `docs/health-check.md`) found a problem. Fixing it is up to this ticket; the check only reports.\n\n### What is wrong\n\(.message)",
+     acceptance: ["\(.fix)", "The daily health check passes again."],
+     out_of_scope: ["Other failing checks (they have their own tickets)."],
+     footer: "Health check: `\(.id)`\nHealth status: failing (checked \($d))"}' <<<"$1"
 }
 
 report() {
-  local ctx project_id team_id labels state_id origin label_id open res id existing uuid ident body count=0
+  local ctx project_id team_id open res id existing uuid ident spec body count=0
   ctx=$(linear_project_context "$HEALTH_PROJECT" 2>/dev/null) || ctx=""
   project_id=$(jq -r '.id // empty' <<<"$ctx" 2>/dev/null); team_id=$(jq -r '.team.id // empty' <<<"$ctx" 2>/dev/null)
   if [ -z "$project_id" ] || [ -z "$team_id" ]; then
     echo "::error::Linear project '$HEALTH_PROJECT' not found or Linear unreachable; the results could not be reported."
     print_results; return 1
   fi
-  labels=$(jq -c '.team.labels.nodes // []' <<<"$ctx")
-  state_id=$(jq -r '[.team.states.nodes[] | select((.name | ascii_downcase) == "todo")][0].id // empty' <<<"$ctx")
-  origin=$(linear_group_label_id "$labels" Origin Agent)
-  label_id=$(linear_ensure_label "$team_id" "$LABEL" "$labels")
-  [ -n "$state_id" ] || echo "::warning::Linear state 'Todo' not found; new tickets get the team's default state" >&2
-  [ -n "$origin" ] || echo "::warning::Label 'Origin › Agent' not found" >&2
   open=$(linear_open_issues_with_label "$team_id" "$project_id" "$LABEL") || { echo "::error::Could not read the open health tickets"; return 1; }
 
   while IFS= read -r res; do
@@ -86,17 +84,14 @@ report() {
       fi
       continue
     fi
-    body=$(ticket_body "$res")
+    spec=$(ticket_spec "$res"); body=$(issue_format "$spec")
     if [ -n "$uuid" ]; then
       linear_set_description "$uuid" "$body"
       echo "$ident: still failing '$id', updated"
       continue
     fi
-    local input created
-    input=$(jq -n --arg t "$team_id" --arg ti "Factory health: $(jq -r .title <<<"$res")" --arg d "$body" --arg s "$state_id" --arg o "$origin" --arg l "$label_id" --arg p "$project_id" \
-      '{teamId: $t, title: $ti, description: $d, projectId: $p, labelIds: ([$o, $l] | map(select(. != "")))}
-       + (if $s != "" then {stateId: $s} else {} end)')
-    created=$(linear_create_issue "$input" 2>/dev/null) || created=""
+    local created
+    created=$(issue_write "$spec" "$ctx" 2>/dev/null | sed -n 's/^created //p') || created=""
     if [ -n "$created" ]; then echo "created $created for '$id'"; count=$((count + 1)); else echo "::error::Could not create the ticket for '$id'"; FAILED=1; fi
   done < <(jq -c . "$RESULTS")
   return "${FAILED:-0}"

@@ -1,0 +1,38 @@
+# Issue writer for rough notes (KV-58). The relay sends `factory-issue-writer` when a person creates a ticket in
+# Triage; agents/issue-writer/run.sh rewrites it into a proper ticket, or asks questions as a comment.
+# The note is untrusted text: it only reaches the script through environment variables.
+name: Issue writer
+
+on:
+  repository_dispatch:
+    types: [factory-issue-writer]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-writer-${{ github.event.client_payload.identifier }}
+  cancel-in-progress: false
+
+jobs:
+  write:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Write the ticket
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          IDENTIFIER: ${{ github.event.client_payload.identifier }}
+          ISSUE_TITLE: ${{ github.event.client_payload.title }}
+          ISSUE_DESCRIPTION: ${{ github.event.client_payload.description }}
+          ISSUE_PROJECT: ${{ github.event.client_payload.project }}
+          PROJECTS: ${{ toJSON(github.event.client_payload.projects) }}
+        run: bash agents/issue-writer/run.sh

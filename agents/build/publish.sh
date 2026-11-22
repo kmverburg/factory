@@ -2,8 +2,24 @@
 # Builder: commit the agent's work and open or update the pull request. Writes step outputs.
 set -eo pipefail
 source "$FACTORY_DIR/agents/lib/linear.sh"
+source "$FACTORY_DIR/agents/lib/issue-writer.sh"
 run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 gh label create needs-human --color D93F0B --description "Factory wants a human to look" --force >/dev/null
+
+# Real manual work: separate tickets for Koen that block this one, which waits in Blocked until they are Done.
+if [ -s .factory/MANUAL_TASKS.json ] && [ ! -s .factory/QUESTIONS.md ] \
+  && jq -e 'type == "array" and any(.[]; (.title // "") != "" and ((.steps // []) | length) > 0)' .factory/MANUAL_TASKS.json >/dev/null 2>&1; then
+  jq '[.[] | select((.title // "") != "" and ((.steps // []) | length) > 0)] | .[:3]' .factory/MANUAL_TASKS.json > "$RUNNER_TEMP/manual_tasks.json"
+  created=$(linear_create_manual_tickets "$ISSUE_IDENTIFIER" "$RUNNER_TEMP/manual_tasks.json" blocking "Created by the builder agent for $ISSUE_IDENTIFIER. Run: $run_url") || true
+  if [ -n "$created" ]; then
+    if [ "$EVENT_TYPE" = "factory-fix" ]; then gh pr edit "$PR_NUMBER" --add-label needs-human; fi
+    linear_comment "$ISSUE_IDENTIFIER" "$(printf '🤔 The builder agent can'"'"'t continue without manual work. Tickets for Koen (they block this one, which moves on when they are Done):\n\n%s' "$created")"
+    linear_set_group_label "$ISSUE_IDENTIFIER" Delivery "Human involved"
+    exit 0
+  fi
+  echo "::warning::Could not create the manual tickets; falling back to Needs Human"
+  echo "The builder needs manual work but the tickets could not be created: $(jq -c . .factory/MANUAL_TASKS.json)" > .factory/QUESTIONS.md
+fi
 
 if [ -s .factory/QUESTIONS.md ]; then
   questions=$(cat .factory/QUESTIONS.md)

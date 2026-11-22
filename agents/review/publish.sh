@@ -2,6 +2,7 @@
 # Reviewer: post the verdict, label the PR, update Linear, send fix rounds and create follow-ups.
 set -eo pipefail
 source "$FACTORY_DIR/agents/lib/linear.sh"
+source "$FACTORY_DIR/agents/lib/issue-writer.sh"
 source "$FACTORY_DIR/agents/review/workflows.sh"
 v=.factory-review/verdict.json
 pr_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$PR_NUMBER"
@@ -59,10 +60,20 @@ fi
 # Follow-up tickets (Todo), never from a PR that is itself a follow-up.
 created=""
 if [ -n "$IDENTIFIER" ] && [ "$IS_FOLLOW_UP" != "true" ]; then
-  jq --argjson n "$MAX_FOLLOW_UPS" '[.follow_ups // [] | .[] | select((.title // "") != "" and (.description // "") != "")] | .[:$n]' "$v" > "$RUNNER_TEMP/follow_ups.json"
+  jq --argjson n "$MAX_FOLLOW_UPS" '[.follow_ups // [] | .[] | select((.title // "") != "" and ((.goal // .description // "") != "")] | .[:$n]' "$v" > "$RUNNER_TEMP/follow_ups.json"
   if [ "$(jq length "$RUNNER_TEMP/follow_ups.json")" != "0" ]; then
     created=$(linear_create_follow_ups "$IDENTIFIER" "$RUNNER_TEMP/follow_ups.json" "Found by the factory reviewer on $pr_url (follow-up to $IDENTIFIER).") || true
   fi
+fi
+
+# Manual work the reviewer can't do or confirm itself becomes its own ticket (factory:manual, assigned to Koen).
+# When the PR is escalated the ticket blocks the original, which waits in Blocked; otherwise it is only related.
+manual_created=""
+if [ -n "$IDENTIFIER" ] && [ "$(jq '[.manual_tasks // [] | .[] | select((.title // "") != "" and ((.steps // []) | length) > 0)] | length' "$v")" != "0" ]; then
+  jq '[.manual_tasks // [] | .[] | select((.title // "") != "" and ((.steps // []) | length) > 0)] | .[:3]' "$v" > "$RUNNER_TEMP/manual_tasks.json"
+  manual_mode=related; [ "$decision" = escalate ] && manual_mode=blocking
+  manual_created=$(linear_create_manual_tickets "$IDENTIFIER" "$RUNNER_TEMP/manual_tasks.json" "$manual_mode" "Found by the factory reviewer on $pr_url.") || true
+  [ -z "$manual_created" ] || created=$(printf '%s\n%s' "$created" "$manual_created" | sed '/^$/d')
 fi
 
 # Preview link and screenshots. The reviewer names the preview URL and up to 3 PNGs under .factory-review/;
@@ -115,7 +126,7 @@ gh label create agent-approved --color 0E8A16 --description "Factory reviewer fo
 gh label create agent-fixing --color FBCA04 --description "Builder agent is applying review fixes" --force >/dev/null
 gh label create needs-human --color D93F0B --description "Factory wants a human to look" --force >/dev/null
 follow_note=""
-[ -n "$created" ] && follow_note=$(printf '\n\nFollow-up tickets created:\n%s' "$created")
+[ -n "$created" ] && follow_note=$(printf '\n\nFollow-up and manual tickets created:\n%s' "$created")
 
 case "$decision" in
   approve)
@@ -150,7 +161,7 @@ $preview_md"
     gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-approved --remove-label agent-fixing
     if [ -n "$IDENTIFIER" ]; then
       linear_comment "$IDENTIFIER" "$(printf '🙋 Reviewer agent wants you to look at %s\n\n' "$pr_url"; jq -r '.reasons[]? | "- \(.)"' "$v"; printf '%s\n\n%s' "$follow_note" "$preview_md")"
-      linear_set_state "$IDENTIFIER" "Needs Human"
+      if [ -n "$manual_created" ]; then linear_set_state "$IDENTIFIER" "Blocked"; else linear_set_state "$IDENTIFIER" "Needs Human"; fi
       linear_set_group_label "$IDENTIFIER" Delivery "Human involved"
     fi
     ;;

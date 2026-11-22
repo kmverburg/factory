@@ -71,42 +71,6 @@ linear_open_follow_ups() {
     "$(jq -n --arg t "$1" --arg l "$FOLLOW_UP_LABEL" '{t: $t, l: $l}')" \
     | jq -r '.data.issues.nodes[] | "\(.identifier): \(.title)"'
 }
-# $1 = source issue, $2 = JSON file with [{title, description}], $3 = footer.
-# Creates the issues in Todo (same team and project) and prints a markdown line per issue.
-linear_create_follow_ups() {
-  local data team_id project_id state_id label_id origin_id existing item title desc input created
-  data=$(linear_issue "$1") || { echo "::warning::Linear lookup failed" >&2; return 0; }
-  team_id=$(jq -r '.data.issue.team.id // empty' <<<"$data")
-  [ -n "$team_id" ] || return 0
-  project_id=$(jq -r '.data.issue.project.id // empty' <<<"$data")
-  state_id=$(jq -r '[.data.issue.team.states.nodes[] | select((.name | ascii_downcase) == "todo")][0].id // empty' <<<"$data")
-  [ -n "$state_id" ] || state_id=$(jq -r '[.data.issue.team.states.nodes[] | select(.type == "backlog")][0].id // empty' <<<"$data")
-  label_id=$(jq -r --arg l "$FOLLOW_UP_LABEL" '[.data.issue.team.labels.nodes[] | select(.name == $l)][0].id // empty' <<<"$data")
-  if [ -z "$label_id" ]; then
-    label_id=$(linear_gql 'mutation($n: String!, $t: String!) { issueLabelCreate(input: { name: $n, teamId: $t, color: "#5E6AD2" }) { issueLabel { id } } }' \
-      "$(jq -n --arg n "$FOLLOW_UP_LABEL" --arg t "$team_id" '{n: $n, t: $t}')" | jq -r '.data.issueLabelCreate.issueLabel.id // empty') || true
-  fi
-  origin_id=$(linear_group_label_id "$(jq -c '.data.issue.team.labels.nodes // []' <<<"$data")" Origin Agent)
-  [ -n "$origin_id" ] || echo "::warning::Label 'Origin › Agent' not found" >&2
-  existing=$(linear_open_follow_ups "$team_id" | sed -E 's/^[^:]+: //' | tr '[:upper:]' '[:lower:]') || true
-  while IFS= read -r item; do
-    title=$(jq -r '.title' <<<"$item")
-    desc=$(jq -r '.description' <<<"$item")
-    if grep -qxF "$(tr '[:upper:]' '[:lower:]' <<<"$title")" <<<"$existing"; then
-      echo "::notice::Skipped duplicate follow-up: $title" >&2
-      continue
-    fi
-    input=$(jq -n --arg t "$team_id" --arg ti "$title" --arg d "$desc"$'\n\n---\n'"$3" --arg s "$state_id" --arg l "$label_id" --arg o "$origin_id" --arg p "$project_id" \
-      '{teamId: $t, title: $ti, description: $d}
-       + (if $s != "" then {stateId: $s} else {} end)
-       + {labelIds: ([$l, $o] | map(select(. != "")))}
-       + (if $p != "" then {projectId: $p} else {} end)')
-    created=$(linear_gql 'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { issue { identifier url } } }' \
-      "$(jq -n --argjson i "$input" '{input: $i}')" | jq -r '.data.issueCreate.issue // empty | "- [\(.identifier)](\(.url)): "' 2>/dev/null) || true
-    if [ -z "$created" ]; then echo "::warning::Could not create follow-up: $title" >&2; continue; fi
-    echo "$created$title"
-  done < <(jq -c '.[]' "$2")
-}
 # $1 = project name (case-insensitive). Prints {id, name, team: {id, states, labels}} for its first team, or nothing.
 linear_project_context() {
   linear_gql 'query($n: String!) { projects(first: 1, filter: { name: { eqIgnoreCase: $n } }) { nodes { id name teams(first: 1) { nodes { id states { nodes { id name type } } labels(first: 250) { nodes { id name parent { name } } } } } } } }' \
