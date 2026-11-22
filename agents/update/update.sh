@@ -50,6 +50,8 @@ while IFS= read -r pr; do
   if [ -z "$files" ]; then echo "::warning::PR #$n: merging $base failed without conflicting files."; continue; fi
 
   if has_label needs-human; then echo "PR #$n: conflicts, but a human is already involved; skipped."; continue; fi
+  # A deploy-watch revert that no longer applies cleanly is Koen's call, not the builder's.
+  if has_label deploy-revert; then echo "PR #$n: a deploy-watch revert with conflicts; left to Koen."; continue; fi
   if [ "$(jq -r '.autoMergeRequest != null' <<<"$pr")" = "true" ]; then
     gh pr merge "$n" --disable-auto || echo "::warning::Could not cancel auto-merge on PR #$n."
   fi

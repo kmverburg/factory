@@ -1,0 +1,11 @@
+{
+  "window_minutes": 60,
+  "baseline_hours": 24,
+  "min_requests": 30,
+  "factor": 2,
+  "min_errors": 5,
+  "min_5xx": 5,
+  "p95_pct": 50,
+  "p95_min_ms": 100,
+  "deploy_check": "Workers Builds"
+}

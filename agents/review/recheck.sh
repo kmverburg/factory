@@ -23,6 +23,8 @@ info=$(gh pr view "$pr" --json state,isDraft,labels,comments,autoMergeRequest,he
 labels=$(jq -c '[.labels[].name]' <<<"$info")
 [ "$(jq -r .state <<<"$info")" = "OPEN" ] || skip "PR #$pr is not open"
 jq -e 'index("agent-built")' <<<"$labels" >/dev/null || skip "PR #$pr is not an agent PR"
+# Revert PRs from the deploy watch are decided by Koen: never re-reviewed (so never auto-merged) by the factory.
+jq -e 'index("deploy-revert")' <<<"$labels" >/dev/null && skip "PR #$pr is a deploy-watch revert, which Koen decides"
 # The failing check must belong to the PR's current head, not to an older push.
 [ "$(jq -r .headRefOid <<<"$info")" = "$HEAD_SHA" ] || skip "the check ran on an older commit"
 
