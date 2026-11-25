@@ -147,18 +147,18 @@ RELAY_BAD=1 run
 check "relay: invalid GitHub token becomes a ticket" 1 "$(count 'Factory health: the relay is not healthy' "$CURL_LOG")"
 LINEAR_API_KEY=short run --dry-run
 check "secret: a malformed key is reported" 1 "$(count 'FAIL  secret-LINEAR_API_KEY' "$tmp/out.txt")"
-CLOUDFLARE_BUILDS_TOKEN= run --dry-run
+CLOUDFLARE_BUILDS_TOKEN='' run --dry-run
 check "secret: a missing token is reported by name" 1 "$(count 'CLOUDFLARE_BUILDS_TOKEN. is not set' "$tmp/out.txt")"
 APP_TOKEN_OUTCOME=failure run --dry-run
 check "secret: a failed app token is reported" 1 "$(count 'FAIL  secret-factory-app' "$tmp/out.txt")"
-GH_TOKEN= run --dry-run
+GH_TOKEN='' run --dry-run
 check "no GitHub token: GitHub checks are skipped, not failed" 0 "$(count 'FAIL  github-' "$tmp/out.txt")"
 
 # No secret value is ever printed.
 run --dry-run
 secrets_found=0
 for v in "$LINEAR_API_KEY" "$CLAUDE_CODE_OAUTH_TOKEN" "$CLOUDFLARE_API_TOKEN" "$CLOUDFLARE_BUILDS_TOKEN" "$HEALTH_CHECK_SECRET" "$GH_TOKEN"; do
-  secrets_found=$((secrets_found + $(grep -cF "$v" "$tmp/out.txt" "$CURL_LOG" "$GH_LOG" | awk -F: '{s += $2} END {print s + 0}')))
+  secrets_found=$((secrets_found + $({ grep -cF "$v" "$tmp/out.txt" "$CURL_LOG" "$GH_LOG" || true; } | awk -F: '{s += $2} END {print s + 0}')))
 done
 check "secrets: no value appears in output or in the recorded requests" 0 "$secrets_found"
 

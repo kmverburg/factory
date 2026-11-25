@@ -181,6 +181,10 @@ Every ticket the factory creates goes through one shared part, `agents/lib/issue
 
 An hour after an app deploys a merge to `main`, the factory compares production with the 24 hours before (error rate, 5xx rate, request time). If it clearly got worse, it opens a revert PR (never auto-merged) and a Needs Human ticket; otherwise it comments that all is normal. Details and settings: [docs/deploy-watch.md](docs/deploy-watch.md).
 
+## Checks on this repo
+
+Every pull request to this repo runs the **Agent scripts** workflow (`.github/workflows/agent-scripts.yml`, which runs `bash agents/ci/run.sh`; you can run that locally too). It runs `bash -n` and `shellcheck` on every script in `agents/`, compiles every `jq` filter (inline ones in the scripts and the `.jq` files; `agents/ci/check-jq.sh`), runs smoke tests of `agents/review/publish.sh` and `agents/build/publish.sh` with `gh`, `git push` and the Linear helpers stubbed (`agents/ci/smoke-test.sh`: approve, fix, escalate, follow-ups, manual tasks, questions, conflicts), and all existing tests (scout, deploy watch, health check, issue writer, reviewer, sync, update, approve). **Add `Agent scripts` as a required status check to the `main` ruleset** (Settings → Rules) so a broken script can't be merged. **A new script needs a smoke test or test** (add it to `agents/ci/smoke-test.sh`, or to a `test.sh` that is listed in `agents/ci/run.sh`; a `test*.sh` that isn't listed fails the check).
+
 ## Changing the GitHub owner
 The factory and the app repos moved from the personal account `kverburg` to `kmverburg` (the owner of this repo). Old links redirect, but nothing here should name the old account any more.
 
