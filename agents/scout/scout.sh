@@ -8,7 +8,8 @@
 #           SCOUT_NO_LLM=1 (plain text instead of Claude's), SCOUT_APPS (apps file, default apps.json next to this script),
 #           SCOUT_MODE=daily|weekly (default: weekly on Mondays (UTC) and in dry runs, daily otherwise),
 #           SAMPLE_FILE (recorded error response instead of the API; signals then use SAMPLE_EVENTS_FILE or see no events),
-#           SAMPLE_PREV_FILE (a snapshot to compare with instead of reading Linear), SCOUT_TODAY (date, YYYY-MM-DD).
+#           SAMPLE_PREV_FILE (a snapshot to compare with instead of reading Linear), SCOUT_TODAY (date, YYYY-MM-DD),
+#           SAMPLE_SHIPPED_FILE (what shipped, as shipped.sh prints it, instead of reading GitHub; needs GH_TOKEN otherwise).
 # Daily mode looks at the last 24 hours and files tickets for signals above their threshold. Weekly mode looks at the
 # last 7 days, also compares with last week's numbers (kept in the previous weekly report) and posts the report.
 set -eo pipefail
@@ -161,7 +162,22 @@ previous_snapshot() {
   return 0
 }
 
-# $1 = app, $2 = report JSON ({table, summary, snapshot, health}). Prints the report markdown.
+# $1 = app, $2 = repo. Prints the "Shipped this week" section: what was deployed in the last 7 days, one line per ticket.
+shipped_section() {
+  local items lines="{}" out repo=$2 check
+  case "$repo" in */*) ;; *) [ -n "$GITHUB_OWNER" ] && repo="$GITHUB_OWNER/$repo" ;; esac
+  if [ -n "$SAMPLE_SHIPPED_FILE" ]; then items=$(<"$SAMPLE_SHIPPED_FILE")
+  else
+    check=$(jq -r --arg r "${2##*/}" '[.[] | select(.repo == $r) | .watch.deploy_check // empty][0] // empty' "$apps_file")
+    items=$(bash "$here/shipped.sh" "$repo" ${check:+"$check"}) || items=null
+  fi
+  if [ "$(jq 'length' <<<"$items")" -gt 0 ] && [ "$items" != null ] \
+     && out=$(ask_claude "$(fill prompt-shipped.md APP "$1" ITEMS "$(jq -c '[.[] | {ticket, title, kind}]' <<<"$items")")" '^{' .) \
+     && jq -e 'type == "object" and all(.[]; type == "string")' <<<"$out" >/dev/null 2>&1; then lines=$out; fi
+  jq -nr -L "$here" --argjson items "$items" --argjson lines "$lines" -f "$here/shipped.jq"
+}
+
+# $1 = app, $2 = report JSON ({table, summary, snapshot, health}), $3 = the "Shipped this week" section. Prints the report markdown.
 report_body() {
   local summary ai changes
   summary=$(jq -c .summary <<<"$2")
@@ -171,8 +187,9 @@ report_body() {
       + [.quiet[] | "- \(.id): \(.why)"] | if length == 0 then ["- Nothing changed by 25% or more, or there is no previous week to compare with."] else . end | join("\n")' <<<"$summary")
     ai=$(printf "### What changed\n%s\n" "$changes")
   fi
-  jq -nr --arg app "$1" --arg ai "$ai" --argjson r "$2" --arg date "$TODAY" '
-    "## Weekly health report: \($app), week to \($date)\n\nCounted by the log scout from Workers Logs over the last 7 days. Request groups with numbers in the path are merged.\n\n"
+  jq -nr --arg app "$1" --arg ai "$ai" --arg shipped "$3" --argjson r "$2" --arg date "$TODAY" '
+    "## Weekly health report: \($app), week to \($date)\n\n" + $shipped + "\n\n"
+    + "Counted by the log scout from Workers Logs over the last 7 days. Request groups with numbers in the path are merged.\n\n"
     + "### Main numbers\n" + $r.table + "\n\n"
     + (if ($r.summary.breaches | length) > 0 then "### Over a threshold or worse than last week\n" + ([$r.summary.breaches[] | "- \(.id): \(.value) (\(.reasons | join("; ")))"] | join("\n")) + "\n\n" else "" end)
     + (if ($r.summary.no_data | length) > 0 then "### No events seen yet\n" + ([$r.summary.no_data[] | "- \(.)"] | join("\n")) + "\n\n" else "" end)
@@ -182,7 +199,7 @@ report_body() {
 
 scan_app() {
   local app repo worker app_json raw groups ctx="" team_id project_id open plan created=0 g body spec res
-  local metrics prev="null" prev_arg findings themes items report updates url
+  local metrics prev="null" prev_arg findings themes items report updates url shipped=""
   app_json=$1
   app=$(jq -r .project <<<"$1"); repo=$(jq -r .repo <<<"$1"); worker=$(jq -r .worker <<<"$1")
   echo "== $app ($worker), $MODE run ($WINDOW_LABEL)"
@@ -218,6 +235,7 @@ scan_app() {
     | jq -c --arg w "$WINDOW_LABEL" 'map(. + {window: $w})' | bash "$here/sign.sh")
   themes=$(collect_themes "$app_json" "$repo" | bash "$here/sign.sh")
   report=$(jq -n -L "$here" --argjson metrics "$metrics" --argjson prev "$prev" --argjson findings "$findings" --arg date "$TODAY" -f "$here/report.jq")
+  [ "$MODE" = weekly ] && shipped=$(shipped_section "$app" "$repo")
   echo "$(jq length <<<"$metrics") number(s) counted, $(jq length <<<"$findings") signal(s) to act on, $(jq length <<<"$themes") request theme(s)"
 
   # Errors first, then signals by how far over they are, then themes.
@@ -233,7 +251,7 @@ scan_app() {
     done < <(jq -c ".[0:$MAX_NEW][]" <<<"$items")
     if [ "$MODE" = weekly ]; then
       echo "--- would post as a project update on $app (health: $(jq -r .health <<<"$report")); real runs do this on Mondays"
-      report_body "$app" "$report"
+      report_body "$app" "$report" "$shipped"
     fi
     return 0
   fi
@@ -270,7 +288,7 @@ scan_app() {
   fi
 
   if [ "$MODE" = weekly ]; then
-    url=$(linear_project_update_create "$project_id" "$(report_body "$app" "$report")" "$(jq -r .health <<<"$report")") || url=""
+    url=$(linear_project_update_create "$project_id" "$(report_body "$app" "$report" "$shipped")" "$(jq -r .health <<<"$report")") || url=""
     if [ -n "$url" ]; then echo "Posted the weekly report: $url"; else echo "::warning::Could not post the weekly report for $app"; FAILED=1; fi
   fi
 }
