@@ -112,15 +112,15 @@ check_relay() {
       200) ;;
       401) problem "The relay refused \`HEALTH_CHECK_SECRET\` (HTTP 401): the relay's copy differs or is missing." ;;
       503)
-        [ "$(jq -r '.github // 0' "$file" 2>/dev/null)" = 200 ] || problem "The relay's GitHub token is invalid or expired (GitHub answered HTTP $(jq -r '.github // 0' "$file" 2>/dev/null))."
+        [ "$(jq -r '.github // 0' "$file" 2>/dev/null)" = 200 ] || problem "The relay's GitHub $([ "$(jq -r '.auth // "token"' "$file" 2>/dev/null)" = app ] && echo 'app credentials (FACTORY_APP_ID / FACTORY_APP_PRIVATE_KEY) are' || echo 'token is') invalid or expired (GitHub answered HTTP $(jq -r '.github // 0' "$file" 2>/dev/null))."
         [ "$(jq -r '.linear // 0' "$file" 2>/dev/null)" = 200 ] || problem "The relay's Linear key was rejected (Linear answered HTTP $(jq -r '.linear // 0' "$file" 2>/dev/null))."
-        while IFS= read -r m; do problem "$m"; done < <(jq -r '(.repos // {}) | to_entries[] | select(.value != 200) | "The relay'"'"'s GitHub token cannot read \(.key) (HTTP \(.value))."' "$file" 2>/dev/null)
+        while IFS= read -r m; do problem "$m"; done < <(jq -r '(.repos // {}) | to_entries[] | select(.value != 200) | "The relay'"'"'s GitHub access cannot read \(.key) (HTTP \(.value))."' "$file" 2>/dev/null)
         [ "${#PROBLEMS[@]}" -gt 0 ] || problem "The relay's deep health check answered HTTP 503." ;;
       *) problem "The relay's deep health check answered HTTP $code." ;;
     esac
   fi
   finish relay "the relay is not healthy" \
-    "Look at the relay's logs in Cloudflare. For an invalid GitHub token, replace \`GITHUB_TOKEN\` in Infisical (\`/cloudflare/factory-relay\`); \`HEALTH_CHECK_SECRET\` must be the same value in \`/cloudflare/factory-relay\` and in this repo's secrets."
+    "Look at the relay's logs in Cloudflare. For invalid GitHub credentials, check \`FACTORY_APP_ID\` and \`FACTORY_APP_PRIVATE_KEY\` (or, before the switch, \`GITHUB_TOKEN\`) in Infisical (\`/cloudflare/factory-relay\`); \`HEALTH_CHECK_SECRET\` must be the same value in \`/cloudflare/factory-relay\` and in this repo's secrets."
 }
 
 # ---------- GitHub ----------

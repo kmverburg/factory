@@ -10,7 +10,7 @@ Each check is a result with an id; a failed one becomes one ticket.
 
 | Id | Check |
 |---|---|
-| `relay` | `GET /health` answers, and `GET /health?deep=1` (with `HEALTH_CHECK_SECRET`) says the relay's GitHub token is valid and can read every repo in `PROJECT_REPOS`, and that its Linear key works |
+| `relay` | `GET /health` answers, and `GET /health?deep=1` (with `HEALTH_CHECK_SECRET`) says the relay's GitHub app credentials (or, before `FACTORY_APP_ID` is set, its personal token) are valid and can read every repo in `PROJECT_REPOS`, and that its Linear key works |
 | `github-<repo>` | the factory app is installed on the repo; the repo has `.github/workflows/factory.yml` (and for app repos it equals the template); `main` has required status checks; auto-merge is allowed; the latest ticket-started *Factory* run didn't fail |
 | `cloudflare-<repo>` | a required Cloudflare check (*Workers Builds: …*) exists on `main` and reported on its latest commit; the Worker still has a Workers Builds trigger (its Git connection) |
 | `linear-<repo>` | the last agent PR merged more than 2 hours ago has a Linear ticket that links it and is Done |
@@ -31,7 +31,7 @@ A check that can't run because its prerequisite is already reported (no GitHub t
 ## The relay's health route
 
 - `GET /health` answers `{"ok": true}`.
-- `GET /health?deep=1` needs `Authorization: Bearer <HEALTH_CHECK_SECRET>` (otherwise 401, and always 401 when the relay has no such secret). It makes read-only calls to GitHub (`/rate_limit` for the token, `/repos/<repo>` for each mapped repo) and Linear (`viewer`) and answers `{ok, github, linear, repos}` with HTTP status codes only, 503 when something fails. It never returns a token.
+- `GET /health?deep=1` needs `Authorization: Bearer <HEALTH_CHECK_SECRET>` (otherwise 401, and always 401 when the relay has no such secret). It makes read-only calls to GitHub (`GET /app` with a signed JWT for the app credentials, or `/rate_limit` for the fallback token; `/repos/<repo>` for each mapped repo) and Linear (`viewer`) and answers `{ok, auth, github, linear, repos}` (`auth` is `app` or `token`) with HTTP status codes only, 503 when something fails. It never returns a token.
 
 ## Setup
 
