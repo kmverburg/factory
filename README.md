@@ -24,6 +24,7 @@ app repo: factory.yml → build.yml (builder agent) → opens PR, issue → "Age
 | `.github/workflows/sync-caller.yml` | Sends caller workflow changes to the app repos |
 | `.github/workflows/health.yml` | Daily self-check that files "Factory health: …" tickets, see [docs/health-check.md](docs/health-check.md) |
 | `.github/workflows/stuck.yml` | Hourly check that retries tickets and PRs whose run died, see [docs/health-check.md](docs/health-check.md#stuck-tickets-and-prs-hourly) |
+| `.github/workflows/weekly-report.yml` | Mondays: weekly factory report (autonomy, lead time, escalations) as a Linear project update, see [docs/weekly-report.md](docs/weekly-report.md) |
 | `agents/lib/issue-writer.sh`, `agents/issue-writer/` | The issue writer: the one way tickets are created, and rough notes from Koen become proper tickets, see [docs/issue-writer.md](docs/issue-writer.md) |
 | `.github/workflows/issue-writer.yml` | Rewrites rough notes in Triage into proper tickets |
 | `templates/app-repo/` | The two files every app repo needs |
