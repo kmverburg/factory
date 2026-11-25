@@ -1,0 +1,48 @@
+# Hourly stuck check (agents/health/stuck.sh, docs/health-check.md): finds tickets in Agent Working whose run died
+# without reporting back and agent PRs that never got a review verdict, retries them once, then hands them to Koen.
+# Can also be started by hand; "dry run" only lists what it found.
+name: Factory stuck check
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (only list stuck tickets and PRs, change nothing)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-stuck
+  cancel-in-progress: false
+
+jobs:
+  stuck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # No `repositories` filter: one token for every repo the factory app is installed on (it reads runs, PRs
+      # and sends the dispatches).
+      - name: Factory app token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Look for stuck tickets and PRs
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          FACTORY_REPO: ${{ github.repository }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+        run: bash agents/health/stuck.sh
