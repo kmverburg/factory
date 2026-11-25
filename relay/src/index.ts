@@ -9,11 +9,16 @@
  * change, answers to the builder's questions); see docs/linear-commands.md.
  */
 
+import { GithubAuthError, appCredentialsStatus, githubHeaders, usesApp } from "./githubAuth";
+
 export interface Env {
   // Secrets (set in the Cloudflare dashboard or with `wrangler secret put`)
   LINEAR_API_KEY: string;
   LINEAR_WEBHOOK_SECRET: string;
-  GITHUB_TOKEN: string;
+  // The factory GitHub App (preferred). While FACTORY_APP_ID isn't set, the personal GITHUB_TOKEN is used instead.
+  FACTORY_APP_ID?: string;
+  FACTORY_APP_PRIVATE_KEY?: string;
+  GITHUB_TOKEN?: string;
   // Shared with the daily health check (docs/health-check.md). Optional: without it the deep health check is off.
   HEALTH_CHECK_SECRET?: string;
 
@@ -128,11 +133,12 @@ async function healthCheck(request: Request, url: URL, env: Env): Promise<Respon
       return 0;
     }
   };
-  const github = (path: string) => status(() => fetch(`https://api.github.com${path}`, { headers: githubHeaders(env) }));
+  const github = (path: string, repo?: string) =>
+    status(async () => fetch(`https://api.github.com${path}`, { headers: await githubHeaders(env, repo) }));
   const repos: Record<string, number> = {};
   for (const mapped of new Set(Object.values(env.PROJECT_REPOS))) {
     const repo = fullRepoName(mapped, env.GITHUB_OWNER);
-    repos[repo] = await github(`/repos/${repo}`);
+    repos[repo] = await github(`/repos/${repo}`, repo);
   }
   const linearStatus = await status(() =>
     fetch(LINEAR_API, {
@@ -141,9 +147,10 @@ async function healthCheck(request: Request, url: URL, env: Env): Promise<Respon
       body: JSON.stringify({ query: `query Health { viewer { id } }` }),
     }),
   );
-  const githubToken = await github("/rate_limit");
+  // With the app: the app id and private key (GET /app with a signed JWT). Without it: the personal token.
+  const githubToken = usesApp(env) ? await appCredentialsStatus(env) : await github("/rate_limit");
   const ok = githubToken === 200 && linearStatus === 200 && Object.values(repos).every((s) => s === 200);
-  return Response.json({ ok, github: githubToken, linear: linearStatus, repos }, { status: ok ? 200 : 503 });
+  return Response.json({ ok, auth: usesApp(env) ? "app" : "token", github: githubToken, linear: linearStatus, repos }, { status: ok ? 200 : 503 });
 }
 
 /** Compares two secrets without leaking where they differ (both are hashed first, so the lengths match). */
@@ -198,7 +205,7 @@ async function findOpenPr(repo: string, identifier: string, env: Env): Promise<P
   const prefix = `${identifier.toLowerCase()}-`;
   for (let page = 1; page <= 5; page++) {
     const res = await fetch(`https://api.github.com/repos/${repo}/pulls?state=open&per_page=100&page=${page}`, {
-      headers: githubHeaders(env),
+      headers: await githubHeaders(env, repo),
     });
     if (!res.ok) throw new Error(`GitHub answered ${res.status} when listing pull requests in ${repo}. The relay's token needs *Pull requests: Read* on it.`);
     const prs = (await res.json()) as PullRequest[];
@@ -257,7 +264,7 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
     }, env);
     if (!response.ok) {
       console.error(`GitHub dispatch to ${repo} failed`, response.status, await response.text());
-      await addComment(issue.id, `🏭 Couldn't start the merge of ${pr.html_url}: ${dispatchFailureMessage(repo, response.status)}`, env);
+      await addComment(issue.id, `🏭 Couldn't start the merge of ${pr.html_url}: ${dispatchFailureMessage(repo, response.status, env)}`, env);
       return;
     }
     await addComment(issue.id, `🏭 👍 Approving ${pr.html_url} once checks pass. It merges (squash), and I'll say here when it has.`, env);
@@ -276,7 +283,7 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
   }, env);
   if (!response.ok) {
     console.error(`GitHub dispatch to ${repo} failed`, response.status, await response.text());
-    await addComment(issue.id, `🏭 Couldn't start a fix round on ${pr.html_url}: ${dispatchFailureMessage(repo, response.status)}`, env);
+    await addComment(issue.id, `🏭 Couldn't start a fix round on ${pr.html_url}: ${dispatchFailureMessage(repo, response.status, env)}`, env);
     return;
   }
   await addComment(issue.id, `🏭 🔧 Sending your comment to the builder as a fix round on ${pr.html_url}. This round doesn't count towards the automatic limit.`, env);
@@ -345,7 +352,7 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
     console.error(`GitHub dispatch to ${repo} failed`, response.status, detail);
     await addComment(
       issue.id,
-      dispatchFailureMessage(repo, response.status),
+      dispatchFailureMessage(repo, response.status, env),
       env,
     );
     await setState(issue, env.NEEDS_HUMAN_STATE, env);
@@ -361,24 +368,24 @@ async function handleIssue(issueId: string, env: Env): Promise<void> {
   );
 }
 
-function githubHeaders(env: Env): Record<string, string> {
-  return {
-    Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "factory-relay",
-  };
-}
-
 /**
  * Sends the repository_dispatch. GitHub answers 301/307/308 with a Location for a moved repo;
  * fetch would turn a redirected POST into a GET, so follow it by hand, once, with the same POST.
  */
 async function dispatchBuild(repo: string, payload: unknown, env: Env): Promise<Response> {
+  let headers: Record<string, string>;
+  try {
+    headers = { ...(await githubHeaders(env, repo)), "Content-Type": "application/json" };
+  } catch (err) {
+    // No token: answer like GitHub would (401 wrong credentials, 404 no access) so callers show the right message.
+    if (!(err instanceof GithubAuthError)) throw err;
+    console.error(`GitHub authentication failed for ${repo}: ${err.message}`);
+    return new Response(err.message, { status: err.status });
+  }
   const init: RequestInit = {
     method: "POST",
     redirect: "manual",
-    headers: { ...githubHeaders(env), "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   };
   const url = `https://api.github.com/repos/${repo}/dispatches`;
@@ -549,8 +556,17 @@ async function releaseBlocked(issueId: string, env: Env): Promise<void> {
   }
 }
 
-function dispatchFailureMessage(repo: string, status: number): string {
+function dispatchFailureMessage(repo: string, status: number, env: Env): string {
   const prefix = `🏭 Factory couldn't start a build in \`${repo}\`.`;
+  if (usesApp(env)) {
+    if (status === 401) {
+      return `${prefix} GitHub rejected the factory app's credentials (HTTP 401): \`FACTORY_APP_ID\` or \`FACTORY_APP_PRIVATE_KEY\` is wrong. Check both in Infisical (\`/cloudflare/factory-relay\`, from \`/shared\`).`;
+    }
+    if (status === 403 || status === 404) {
+      return `${prefix} The app credentials work but the factory app can't reach that repo (HTTP ${status}). Install the app on \`${repo}\` with *Contents: Read and write* and *Pull requests: Read*.`;
+    }
+    return `${prefix} GitHub answered ${status}.`;
+  }
   if (status === 401) {
     return `${prefix} GitHub answered 401: the relay's GitHub token is invalid or expired. Replace \`GITHUB_TOKEN\` in Infisical (\`/cloudflare/factory-relay\`).`;
   }

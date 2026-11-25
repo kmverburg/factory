@@ -147,6 +147,25 @@ const stateUpdates = () =>
 const comments = () =>
   linearCalls().filter((c) => c.body.query.includes("Comment")).map((c) => c.body.variables.body as string);
 
+describe("app credential failures in Linear comments", () => {
+  const appEnv = { FACTORY_APP_ID: "123", FACTORY_APP_PRIVATE_KEY: "not a key" };
+
+  it("says the app credentials are wrong", async () => {
+    Object.assign(env, appEnv);
+    try {
+      await send(stateChange());
+    } finally {
+      delete env.FACTORY_APP_ID;
+      delete env.FACTORY_APP_PRIVATE_KEY;
+    }
+    expect(stateUpdates()).toEqual(["s-human"]);
+    expect(comments()[0]).toContain("FACTORY_APP_PRIVATE_KEY");
+    expect(comments()[0]).toContain("credentials");
+    expect(comments()[0]).not.toContain("not a key");
+    expect(githubCalls()).toHaveLength(0);
+  });
+});
+
 describe("webhook security", () => {
   it("accepts a valid signature", async () => {
     const res = await send(stateChange());
@@ -814,7 +833,7 @@ describe("health route", () => {
     githubStatus = 200;
     const res = await get("/health?deep=1", { authorization: "Bearer health-secret" });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, github: 200, linear: 200, repos: { "acme/backpack": 200, "acme/feast": 200 } });
+    expect(await res.json()).toEqual({ ok: true, auth: "token", github: 200, linear: 200, repos: { "acme/backpack": 200, "acme/feast": 200 } });
     expect(calls.every((c) => (c.init.method ?? "GET") === "GET" || c.url.includes("linear.app"))).toBe(true);
     expect(calls.filter((c) => c.url.includes("linear.app")).every((c) => c.body.query.startsWith("query "))).toBe(true);
   });
