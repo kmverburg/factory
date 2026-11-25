@@ -60,7 +60,7 @@ fi
 # Follow-up tickets (Todo), never from a PR that is itself a follow-up.
 created=""
 if [ -n "$IDENTIFIER" ] && [ "$IS_FOLLOW_UP" != "true" ]; then
-  jq --argjson n "$MAX_FOLLOW_UPS" '[.follow_ups // [] | .[] | select((.title // "") != "" and ((.goal // .description // "") != "")] | .[:$n]' "$v" > "$RUNNER_TEMP/follow_ups.json"
+  jq --argjson n "$MAX_FOLLOW_UPS" '[.follow_ups // [] | .[] | select((.title // "") != "" and ((.goal // .description // "") != ""))] | .[:$n]' "$v" > "$RUNNER_TEMP/follow_ups.json"
   if [ "$(jq length "$RUNNER_TEMP/follow_ups.json")" != "0" ]; then
     created=$(linear_create_follow_ups "$IDENTIFIER" "$RUNNER_TEMP/follow_ups.json" "Found by the factory reviewer on $pr_url (follow-up to $IDENTIFIER).") || true
   fi
