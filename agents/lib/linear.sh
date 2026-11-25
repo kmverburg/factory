@@ -152,3 +152,13 @@ linear_issue_comment_bodies() {
   linear_gql 'query($id: String!) { issue(id: $id) { comments(first: 100) { nodes { body } } } }' \
     "$(jq -n --arg id "$1" '{id: $id}')" | jq -c '.data.issue.comments.nodes | map(.body)'
 }
+# $1 = team id, $2 = project id, $3 = state name (case-insensitive). Prints the project's issues in that state as a JSON array [{id, identifier, updatedAt}].
+linear_issues_in_state() {
+  linear_gql 'query($t: ID!, $p: ID!, $s: String!) { issues(first: 100, filter: { team: { id: { eq: $t } }, project: { id: { eq: $p } }, state: { name: { eqIgnoreCase: $s } } }) { nodes { id identifier updatedAt } } }' \
+    "$(jq -n --arg t "$1" --arg p "$2" --arg s "$3" '{t: $t, p: $p, s: $s}')" | jq -c '.data.issues.nodes'
+}
+# $1 = issue identifier or id. Prints the issue's comments as a JSON array [{body, createdAt}] (the first 100), or nothing.
+linear_issue_comments() {
+  linear_gql 'query($id: String!) { issue(id: $id) { comments(first: 100) { nodes { body createdAt } } } }' \
+    "$(jq -n --arg id "$1" '{id: $id}')" | jq -c '.data.issue.comments.nodes'
+}

@@ -258,7 +258,7 @@ extract_queries() {
   perl -0777 -ne 'print "$1\0" while /`(query\s[^`]*)`/g' "$ROOT/relay/src/index.ts"
 }
 
-# Sample variables come from the Factory project: $id = an issue, $t = its team, $p = the project, $n = its name, $l = a label name.
+# Sample variables come from the Factory project: $id = an issue, $t = its team, $p = the project, $n = its name, $l = a label name, $s = a state name.
 check_linear_queries() {
   local ctx project_id team_id issue_id q vars name v n=0 out msg
   ctx=$(linear_project_context "$HEALTH_PROJECT" 2>/dev/null) || ctx=""
@@ -281,6 +281,7 @@ check_linear_queries() {
           p) vars=$(jq -c --arg x "$project_id" '.p = $x' <<<"$vars") ;;
           n) vars=$(jq -c --arg x "$HEALTH_PROJECT" '.n = $x' <<<"$vars") ;;
           l) vars=$(jq -c '.l = "factory:follow-up"' <<<"$vars") ;;
+          s) vars=$(jq -c '.s = "Agent Working"' <<<"$vars") ;;
           *) problem "A query ($name, \`${q:0:60}…\`) uses the variable \`\$$v\` and the health check has no sample value for it: add one to \`check_linear_queries\` in \`agents/health/checks.sh\`."; vars=""; break ;;
         esac
       done < <(grep -oP '\$\K\w+(?=:)' <<<"$q" | sort -u)

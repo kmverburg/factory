@@ -23,6 +23,23 @@ Repos come from the relay's `PROJECT_REPOS`; a repo's Worker name comes from `ag
 
 A check that can't run because its prerequisite is already reported (no GitHub token, no Linear key) is skipped, so one root cause makes one ticket.
 
+## Stuck tickets and PRs (hourly)
+
+A factory run can die without reporting back (GitHub losing contact with its runner, as in KV-62). `agents/health/stuck.sh`, run every hour by `.github/workflows/stuck.yml`, makes sure nothing stays stuck silently. It uses the factory app token to read the runs of each app's `factory.yml` workflow, its open agent PRs and the Linear project of each repo in `PROJECT_REPOS`. Test: `bash agents/health/test-stuck.sh`.
+
+**Tickets.** A ticket in **Agent Working** is stuck when no factory run for it is in progress and it hasn't changed for more than an hour. Runs that are queued, waiting or in progress never count as stuck. Runs belong to a ticket by its identifier in the run's name (the caller workflow names dispatch runs `Factory KV-1`) or in its branch name. Callers that don't name their runs yet are handled carefully: while a dispatch run without a ticket name is in progress, nothing in that repo counts as stuck. If a repo's runs can't be read, it is skipped.
+
+- First time: comment "🏭 The last run stopped without reporting back (run link, conclusion); starting it again." With an open agent PR (label `agent-built`, branch starting with the identifier) the work continues as a **fix round** on that PR (a `factory-fix` event, the round count unchanged, the PR labelled `agent-fixing`), so finished work isn't thrown away. Without a PR the ticket goes back to **Agent Ready**, which starts a fresh build through the relay.
+- Stuck again within 24 hours: **Needs Human** (and Delivery › Human involved) with a comment that links both runs and what is known about why they stopped (the failed job and step, and GitHub's own message). Never retried more than once in a row.
+
+**PRs without a verdict.** An open agent PR with none of the labels `agent-approved`, `needs-human` or `agent-fixing` for more than an hour (not a draft, ticket not done or in Needs Human) with no run in progress gets its review started again once (a `factory-review` event, which the caller workflow turns into a call of the review workflow), with a comment on the ticket. If it is still without a verdict an hour after that, the ticket goes to **Needs Human** with a comment linking both review runs, and the PR gets `needs-human`.
+
+Both remember their retry in a hidden marker in the comment on the ticket (`<!-- stuck-check:ticket|review prev=<run url> -->`); a marker older than 24 hours is ignored.
+
+**Dry run:** start the workflow by hand (the default is a dry run) or run `bash agents/health/stuck.sh --dry-run` with `GH_TOKEN`, `FACTORY_REPO` and `LINEAR_API_KEY`: it only lists what it found.
+
+**Rollout.** The check needs the `run-name` and the `factory-review` event in each app repo's caller workflow (`templates/app-repo/.github/workflows/factory.yml`); the caller sync opens "Update factory caller workflow" PRs for that. Until an app has merged it, its runs can't be matched to tickets (so nothing is retried while a dispatch run is active) and PRs can't be re-reviewed there (the dispatch is accepted but starts nothing).
+
 ## Tickets
 
 - Title `Factory health: <what is wrong>`, in the **Factory** project, **Todo**, labels **Origin › Agent** and `factory:health`. Never Agent Ready. The text says what is wrong and how to fix it.
