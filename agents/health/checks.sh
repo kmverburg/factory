@@ -163,15 +163,38 @@ check_github() { # $1 = repo
 
 # ---------- Cloudflare ----------
 
-check_cloudflare() { # $1 = repo, $2 = worker
-  local repo=$1 worker=$2 required cf names res code file tag
+# The Cloudflare setup depends on how the app deploys, set per app in the scout's apps.json (next to "worker"):
+#   "cloudflare": {"required_check": "check"}   deploys through GitHub Actions; that job must be required on main and report
+#   no "cloudflare" key (the factory's relay)    deploys through Workers Builds: the *Workers Builds* check and the Git connection
+# $1 = repo. Prints the app's required deploy check name, or nothing for Workers Builds.
+app_required_check() { jq -r --arg r "${1##*/}" '[.[] | select(.repo == $r) | .cloudflare.required_check // empty][0] // empty' "$APPS_FILE" 2>/dev/null; }
+
+# $1 = repo, $2 = worker
+check_cloudflare() {
+  local repo=$1 worker=$2 want required cf names res code file tag
+  want=$(app_required_check "$repo")
   required=$(required_checks "$repo")
+  names=$({ gh api "repos/$repo/commits/main/check-runs?per_page=100" --jq '.check_runs[].name' 2>/dev/null
+            gh api "repos/$repo/commits/main/status" --jq '.statuses[].context' 2>/dev/null; } || true)
+  if [ -n "$want" ]; then
+    # Deploys through GitHub Actions: the deploy workflow's job (e.g. "check", or "Deploy / check") must be required and report.
+    cf=$(grep -ixE "(.* / )?$(sed 's/[][\\.^$*+?(){}|]/\\&/g' <<<"$want")" <<<"$required" || true)
+    if [ -z "$cf" ]; then
+      problem "The deploy workflow's \`$want\` check is not a required check on \`main\`, so a broken change could merge without it."
+    else
+      while IFS= read -r c; do
+        [ -n "$c" ] || continue
+        grep -qxF "$c" <<<"$names" || problem "The required check \`$c\` did not report on the latest commit of \`main\`."
+      done <<<"$cf"
+    fi
+    finish "cloudflare-${repo##*/}" "Deploy check of ${repo##*/} is incomplete" \
+      "Make the \`$want\` job of the deploy workflow (\`.github/workflows/deploy.yml\`) a required check on \`main\` and check that it runs on every push."
+    return 0
+  fi
   cf=$(grep -iE 'workers builds|cloudflare' <<<"$required" || true)
   if [ -z "$cf" ]; then
     problem "No required Cloudflare check (*Workers Builds: …*) on \`main\`, so a broken deploy would not block a merge."
   else
-    names=$({ gh api "repos/$repo/commits/main/check-runs?per_page=100" --jq '.check_runs[].name' 2>/dev/null
-              gh api "repos/$repo/commits/main/status" --jq '.statuses[].context' 2>/dev/null; } || true)
     while IFS= read -r c; do
       [ -n "$c" ] || continue
       grep -qxF "$c" <<<"$names" || problem "The required check \`$c\` did not report on the latest commit of \`main\` (the Workers Builds connection may be gone)."
@@ -182,15 +205,17 @@ check_cloudflare() { # $1 = repo, $2 = worker
   elif [ -z "$CLOUDFLARE_BUILDS_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
     echo "skipped the Workers Builds connection of $repo: no Cloudflare token" >&2
   else
-    res=$(bearer_get "$CLOUDFLARE_BUILDS_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"); code=${res%%$'\t'*}; file=${res#*$'\t'}
+    # The build triggers are listed by the Worker's tag. If the token can't look the Worker up, or doesn't see it, the
+    # connection can't be judged: say so on stderr instead of filing a ticket for something that may be fine.
+    res=$(bearer_get "$CLOUDFLARE_BUILDS_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts?per_page=100"); code=${res%%$'\t'*}; file=${res#*$'\t'}
     tag=$(jq -r --arg w "$worker" '[.result[]? | select(.id == $w) | .tag][0] // empty' "$file" 2>/dev/null)
     if [ "$code" != 200 ]; then
-      problem "Cloudflare did not list the Workers (HTTP $code); \`CLOUDFLARE_BUILDS_TOKEN\` may lack *Workers Scripts: Read*."
+      echo "skipped the Workers Builds connection of $repo: Cloudflare did not list the Workers (HTTP $code; the token may lack Workers Scripts: Read)" >&2
     elif [ -z "$tag" ]; then
-      problem "The Worker \`$worker\` was not found in the Cloudflare account."
+      echo "skipped the Workers Builds connection of $repo: the Worker $worker is not in the list this token can see" >&2
     else
       res=$(bearer_get "$CLOUDFLARE_BUILDS_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/workers/$tag/triggers"); code=${res%%$'\t'*}; file=${res#*$'\t'}
-      if [ "$code" != 200 ]; then problem "Cloudflare did not list the build triggers of \`$worker\` (HTTP $code)."
+      if [ "$code" != 200 ]; then echo "skipped the Workers Builds connection of $repo: Cloudflare did not list the build triggers (HTTP $code)" >&2
       elif [ "$(jq '.result | length' "$file" 2>/dev/null || echo 0)" = 0 ]; then problem "The Worker \`$worker\` has no Workers Builds trigger: its Git connection is gone."; fi
     fi
   fi
