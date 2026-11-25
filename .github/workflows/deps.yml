@@ -1,0 +1,50 @@
+# Weekly dependency check (agents/deps/, docs/dependency-updates.md): looks for outdated packages and security
+# advisories in every app repo and this one, and files the updates as Linear tickets. Can also be started by hand;
+# "dry run" only prints the tickets it would file.
+name: Dependency check
+
+on:
+  schedule:
+    # Mondays 06:00 UTC, after the log scout (05:00).
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (only print the tickets it would file, don't touch Linear)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-check
+  cancel-in-progress: false
+
+jobs:
+  deps:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # Read access to every repo the factory app is installed on, to clone them.
+      - name: Factory app token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      # npm runs with --ignore-scripts, so nothing from the packages is executed.
+      - name: Run the dependency check
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          FACTORY_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+        run: bash agents/deps/deps.sh

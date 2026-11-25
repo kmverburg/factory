@@ -162,6 +162,10 @@ Every ticket the factory creates goes through one shared part, `agents/lib/issue
 - **Rough notes:** a ticket Koen creates in Triage with just a note (`backpack: weight per item?`) is rewritten into a proper ticket in the right project with Origin › Human, with his words kept at the bottom, or gets questions as a comment. The note must name the app; it is never guessed. Needs `FACTORY_REPO` in the relay's `wrangler.jsonc` and the repo secrets `CLAUDE_CODE_OAUTH_TOKEN` and `LINEAR_API_KEY` in this repo.
 - Details: [docs/issue-writer.md](docs/issue-writer.md). Tests: `bash agents/lib/test-issue-writer.sh`, `bash agents/issue-writer/test.sh`.
 
+## Weekly dependency updates
+
+`agents/deps/deps.sh` (`.github/workflows/deps.yml`, Mondays) checks `npm outdated` and `npm audit` in every app repo and this one, and files up to three tickets per repo per week: security fixes (High priority, Agent Ready), routine minor/patch updates (Agent Ready) and major updates (Todo). Versions must be at least 2 weeks old, except security fixes; an open ticket from an earlier week is updated instead of duplicated. See [docs/dependency-updates.md](docs/dependency-updates.md).
+
 ## Log scout
 
 `agents/scout/scout.sh` looks for things to improve in each app's Cloudflare Workers Logs (read-only `CLOUDFLARE_OBSERVABILITY_TOKEN` plus `CLOUDFLARE_ACCOUNT_ID`), not just errors. Clear problems become tickets in the app's Linear project in **Triage** (Todo if the team has none), labelled `source:logs` and **Origin › Agent**, never *Agent Ready*; everything else goes into a **weekly health report**, posted on Mondays as a Linear project update. Counting, thresholds and comparisons are plain code; Claude only writes the ticket and report text, and log text is untrusted: masked (emails, tokens), normalised (numbers and ids) and only shown in code blocks.
