@@ -50,7 +50,8 @@ Then edit `PROJECT_REPOS` in `relay/wrangler.jsonc`: one line per app, mapping t
 ### 3. Worker secrets
 Don't add these by hand in Cloudflare. Set them in Infisical, folder `/cloudflare/factory-relay` (see [Secrets](#secrets)), and let the sync write them to the `factory` Worker:
 - `LINEAR_API_KEY` (lives in `/shared` and is referenced from this folder)
-- `GITHUB_TOKEN`: a fine-grained GitHub token (github.com → Settings → Developer settings → Fine-grained tokens) with access to your app repos and the permission **Contents: Read and write**
+- `FACTORY_APP_ID` and `FACTORY_APP_PRIVATE_KEY`: the factory GitHub App's credentials, referenced from `/shared` (for example `${prod.shared.FACTORY_APP_ID}`). The relay signs a JWT with the key and creates a short-lived installation token per owner (cached until 5 minutes before it expires). The app needs *Contents: Read and write* and *Pull requests: Read* on your app repos. The key may be GitHub's PKCS#1 PEM (`BEGIN RSA PRIVATE KEY`) or PKCS#8 as is.
+- `GITHUB_TOKEN` (optional fallback): a fine-grained personal token with *Contents: Read and write*. Used only while `FACTORY_APP_ID` isn't set; delete it, and the token on GitHub, once the app works.
 - `LINEAR_WEBHOOK_SECRET`: from step 4
 
 ### 4. Linear webhook
@@ -88,8 +89,9 @@ All secrets live in one Infisical project, `factory`, environment `prod`. There 
 | `CLOUDFLARE_BUILDS_TOKEN` | Read-only token that lets the reviewer read Cloudflare build results ([KOE-15](https://linear.app/koenv/issue/KOE-15/treat-failing-ci-checks-on-agent-prs-as-something-to-fix)) | `/github/factory` → app repos |
 | `CLOUDFLARE_OBSERVABILITY_TOKEN` | Read-only token that lets the log scout read Workers Logs ([KOE-17](https://linear.app/koenv/issue/KOE-17/log-scout-turn-app-errors-into-linear-tickets)) | `/github/factory` → factory repo |
 | `LINEAR_WEBHOOK_SECRET` | Verifies that webhooks really come from Linear | `/cloudflare/factory-relay` → `factory` Worker |
-| `HEALTH_CHECK_SECRET` | Lets the daily health check ask the relay whether its GitHub token works ([docs/health-check.md](docs/health-check.md)) | `/cloudflare/factory-relay` → `factory` Worker, and the same value in the folder synced to the factory repo |
-| `GITHUB_TOKEN` (relay) | Lets the relay start builds in the app repos | `/cloudflare/factory-relay` → `factory` Worker |
+| `HEALTH_CHECK_SECRET` | Lets the daily health check ask the relay whether its GitHub app credentials work ([docs/health-check.md](docs/health-check.md)) | `/cloudflare/factory-relay` → `factory` Worker, and the same value in the folder synced to the factory repo |
+| `FACTORY_APP_ID`, `FACTORY_APP_PRIVATE_KEY` (relay) | Let the relay start builds in the app repos with short-lived installation tokens | `/cloudflare/factory-relay` → `factory` Worker, referenced from `/shared` |
+| `GITHUB_TOKEN` (relay, fallback) | Personal token the relay uses only while `FACTORY_APP_ID` isn't set; delete once the app works | `/cloudflare/factory-relay` → `factory` Worker |
 
 ### Local development
 Run the relay with dummy secrets from Infisical's `dev` environment instead of creating `relay/.dev.vars` by hand:
@@ -131,7 +133,7 @@ One-time setup for this repo, the same as step 5 for an app:
 1. Repo secrets `CLAUDE_CODE_OAUTH_TOKEN` and `LINEAR_API_KEY`, synced from Infisical's `/shared` folder (see [Secrets](#secrets)).
 2. Settings → Actions → General → *Allow GitHub Actions to create and approve pull requests*.
 3. The Claude GitHub App has access to this repo.
-4. The relay's GitHub token (`GITHUB_TOKEN`, from Infisical's `/cloudflare/factory-relay` folder) includes this repo, with *Contents: Read and write*.
+4. The factory GitHub App (or, until the relay has `FACTORY_APP_ID`, the relay's `GITHUB_TOKEN`) is installed on this repo with *Contents: Read and write*.
 
 ### Linear comment commands
 

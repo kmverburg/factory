@@ -49,5 +49,5 @@
   }
 
   // Secrets are NOT stored here. They come from Infisical (/cloudflare/factory-relay),
-  // synced to the Worker as type "Secret": LINEAR_API_KEY, LINEAR_WEBHOOK_SECRET, GITHUB_TOKEN, HEALTH_CHECK_SECRET (optional: the deep health check)
+  // synced to the Worker as type "Secret": LINEAR_API_KEY, LINEAR_WEBHOOK_SECRET, GITHUB_TOKEN (fallback), FACTORY_APP_ID, FACTORY_APP_PRIVATE_KEY, HEALTH_CHECK_SECRET (optional: the deep health check)
 }
