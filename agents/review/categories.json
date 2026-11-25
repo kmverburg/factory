@@ -1,0 +1,16 @@
+[
+  {"id": "dependency-dev", "label": "adds or upgrades a dev-only dependency", "propose": true},
+  {"id": "dependency-runtime", "label": "adds, removes or upgrades a runtime dependency", "propose": true},
+  {"id": "schema", "label": "changes a database schema", "propose": true},
+  {"id": "data-deletion", "label": "deliberately deletes stored data", "propose": true},
+  {"id": "infra-config", "label": "changes CI, deployment or infrastructure config", "propose": true},
+  {"id": "large-change", "label": "changes more than 400 lines", "propose": true},
+  {"id": "off-ticket", "label": "does something different from the ticket, or the ticket is too vague", "propose": true},
+  {"id": "unverifiable", "label": "could not be verified", "propose": true},
+  {"id": "failed-check", "label": "a CI check failed for a reason outside the code", "propose": true},
+  {"id": "fix-cap", "label": "still needed fixes after the automatic rounds", "propose": true},
+  {"id": "workflow-change", "label": "changes a workflow under .github/", "propose": false},
+  {"id": "security", "label": "touches authentication, authorisation, payments, secrets, encryption or personal data", "propose": false},
+  {"id": "factory-rule", "label": "breaks a Factory review rule", "propose": false},
+  {"id": "other", "label": "other", "propose": false}
+]

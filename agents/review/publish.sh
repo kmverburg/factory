@@ -22,6 +22,7 @@ if [ "$decision" = "fix" ]; then
   fi
   if [ -n "$why" ]; then
     jq --arg w "$why" '.decision = "escalate" | .reasons = ((.reasons // []) + [$w])' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
+    jq '.categories = ((.categories // []) + ["fix-cap"])' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
     decision=escalate
   fi
 fi
@@ -32,9 +33,18 @@ wf_files=$(workflows_changed .factory-review/pr.json .factory-review/diff.patch)
 if [ -n "$wf_files" ] && [ "$decision" != "escalate" ]; then
   wf_list=$(printf '%s' "$wf_files" | tr '\n' ' ')
   jq --arg w "This PR changes files under .github/ ($wf_list), which always needs a human to approve." \
-    '.decision = "escalate" | .reasons = ((.reasons // []) + [$w]) | .fix_requests = []' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
+    '.decision = "escalate" | .reasons = ((.reasons // []) + [$w]) | .fix_requests = [] | .categories = ((.categories // []) + ["workflow-change"])' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
   decision=escalate
 fi
+# Escalation categories: only known ids (categories.json), at least one, so they can be counted (docs/escalation-learning.md).
+# "What you need to decide" is the first thing Koen reads; without one from the reviewer it falls back to the first reason.
+jq --slurpfile c "$FACTORY_DIR/agents/review/categories.json" '
+  .categories = ([(.categories // [])[] | select(. as $x | $c[0] | map(.id) | index($x))] | unique | if length == 0 then ["other"] else . end)
+  | .decision_needed = (if ((.decision_needed // "") | gsub("\\s"; "")) != "" then .decision_needed
+      else "Approve this PR anyway? " + ((.reasons // [])[0] // .summary // "The reviewer needs a human to look.") end)
+  | .decision_needed = (.decision_needed | gsub("\n"; " ") | .[:300])' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
+categories=$(jq -r '.categories | join(",")' "$v")
+decide=$(jq -r .decision_needed "$v")
 risk=$(jq -r '.risk // "unknown"' "$v")
 
 # Auto-merge only for an approved, low-risk PR opened by the factory, unless the repo opted out.
@@ -98,6 +108,7 @@ done < <(jq -r '[.screenshots // [] | .[] | select(type == "object") | select((.
 [ -z "$shots" ] || preview_md="$preview_md"$'\n'"$shots"
 
 {
+  [ "$decision" != escalate ] || { echo "**What you need to decide:** $decide"; echo; }
   case "$decision" in
     approve)
       echo "### ✅ Factory review: approved (risk: $risk)"
@@ -119,6 +130,8 @@ done < <(jq -r '[.screenshots // [] | .[] | select(type == "object") | select((.
   fi
   echo; echo "**Checks:** $(jq -r '.checks // "not reported"' "$v")"
   echo; printf '%s\n' "$preview_md"
+  # Hidden marker: lets learn.sh count what Koen approves unchanged, by reason.
+  [ "$decision" != escalate ] || printf '\n<!-- factory-escalation: %s -->\n' "$categories"
 } > "$RUNNER_TEMP/comment.md"
 gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/comment.md"
 
@@ -160,10 +173,13 @@ $preview_md"
   *)
     gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-approved --remove-label agent-fixing
     if [ -n "$IDENTIFIER" ]; then
-      linear_comment "$IDENTIFIER" "$(printf '🙋 Reviewer agent wants you to look at %s\n\n' "$pr_url"; jq -r '.reasons[]? | "- \(.)"' "$v"; printf '%s\n\n%s' "$follow_note" "$preview_md")"
+      linear_comment "$IDENTIFIER" "$(printf '**What you need to decide:** %s\n\n🙋 Reviewer agent wants you to look at %s\n\n' "$decide" "$pr_url"; jq -r '.reasons[]? | "- \(.)"' "$v"; printf '%s\n\n%s' "$follow_note" "$preview_md")"
       if [ -n "$manual_created" ]; then linear_set_state "$IDENTIFIER" "Blocked"; else linear_set_state "$IDENTIFIER" "Needs Human"; fi
       linear_set_group_label "$IDENTIFIER" Delivery "Human involved"
     fi
     ;;
 esac
+
+# Learn from past escalations (best effort, never fails the review): propose a rule for a kind Koen always approves.
+bash "$FACTORY_DIR/agents/review/learn.sh" || echo "::warning::Escalation learning failed" >&2
 exit 0
