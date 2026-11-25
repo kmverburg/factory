@@ -83,6 +83,12 @@ linear_open_issues_with_label() {
     "$(jq -n --arg t "$1" --arg p "$2" --arg l "$3" '{t: $t, p: $p, l: $l}')" \
     | jq -c '.data.issues.nodes'
 }
+# $1 = team id, $2 = project id. Prints all open issues of the project as a JSON array [{id, identifier, description, labels: [name]}], with or without labels.
+linear_open_issues_in_project() {
+  linear_gql 'query($t: ID!, $p: ID!) { issues(first: 250, filter: { team: { id: { eq: $t } }, project: { id: { eq: $p } }, state: { type: { nin: ["completed", "canceled"] } } }) { nodes { id identifier description labels(first: 50) { nodes { name } } } } }' \
+    "$(jq -n --arg t "$1" --arg p "$2" '{t: $t, p: $p}')" \
+    | jq -c '.data.issues.nodes | map(.labels = [.labels.nodes[]?.name])'
+}
 # $1 = team id, $2 = label name, $3 = the team's labels as JSON [{id, name}]. Prints the label id, creating the label if needed.
 linear_ensure_label() {
   local id
@@ -90,6 +96,11 @@ linear_ensure_label() {
   if [ -z "$id" ]; then
     id=$(linear_gql 'mutation($n: String!, $t: String!) { issueLabelCreate(input: { name: $n, teamId: $t, color: "#F2994A" }) { issueLabel { id } } }' \
       "$(jq -n --arg n "$2" --arg t "$1" '{n: $n, t: $t}')" | jq -r '.data.issueLabelCreate.issueLabel.id // empty') || true
+  fi
+  if [ -z "$id" ]; then
+    # Creating failed, often because the label exists after all (the caller's list was stale): look it up instead of leaving it off.
+    id=$(linear_gql 'query($t: String!, $n: String!) { team(id: $t) { labels(first: 50, filter: { name: { eq: $n } }) { nodes { id } } } }' \
+      "$(jq -n --arg n "$2" --arg t "$1" '{n: $n, t: $t}')" | jq -r '.data.team.labels.nodes[0].id // empty') || true
   fi
   echo "$id"
 }

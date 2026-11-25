@@ -12,10 +12,12 @@ Each check is a result with an id; a failed one becomes one ticket.
 |---|---|
 | `relay` | `GET /health` answers, and `GET /health?deep=1` (with `HEALTH_CHECK_SECRET`) says the relay's GitHub token is valid and can read every repo in `PROJECT_REPOS`, and that its Linear key works |
 | `github-<repo>` | the factory app is installed on the repo; the repo has `.github/workflows/factory.yml` (and for app repos it equals the template); `main` has required status checks; auto-merge is allowed; the latest ticket-started *Factory* run didn't fail |
-| `cloudflare-<repo>` | a required Cloudflare check (*Workers Builds: …*) exists on `main` and reported on its latest commit; the Worker still has a Workers Builds trigger (its Git connection) |
+| `cloudflare-<repo>` | what the app's `cloudflare` setting in `agents/scout/apps.json` asks for. With `"cloudflare": {"required_check": "check"}` (Backpack, Feast: they deploy through GitHub Actions) the deploy workflow's `check` job is a required check on `main` and reported on its latest commit. Without it (the factory's relay) a required *Workers Builds: …* check exists and reported, and the Worker still has a Workers Builds trigger (its Git connection); if the token can't list the Workers, that last part is skipped with a note instead of a ticket |
 | `linear-<repo>` | the last agent PR merged more than 2 hours ago has a Linear ticket that links it and is Done |
 | `secret-<NAME>` | every secret the workflows use is set, has the right format (length, prefix) and passes one harmless API call: Linear `viewer`, Cloudflare token verify, GitHub app token creation |
 | `linear-queries` | every GraphQL **query** in `agents/lib/linear.sh` and `relay/src/index.ts` runs against the real Linear API, with sample values from the *Factory* project, and succeeds. This catches problems the tests (which fake Linear) can't, like [KOE-32](https://linear.app/koenv/issue/KV-32/bug-relay-doesnt-release-blocked-tickets-when-their-blocker-is-done)'s oversized query |
+
+Existing tickets are found by the `Health check: <id>` marker among all open tickets of the project, with or without the label; the label is added (and created if the team has none) when missing.
 
 Repos come from the relay's `PROJECT_REPOS`; a repo's Worker name comes from `agents/scout/apps.json` (the factory's own from `relay/wrangler.jsonc`). A new query is found by itself, but a new *variable name* needs a sample value in `check_linear_queries` (`agents/health/checks.sh`); until then the check fails and says so. Mutations are never run. The test fails if another file starts calling the Linear API.
 

@@ -60,15 +60,24 @@ ticket_spec() {
      footer: "Health check: `\(.id)`\nHealth status: failing (checked \($d))"}' <<<"$1"
 }
 
+# Sets label_id to the id of the health label, creating it once if the team has none; ctx (what issue_write reads) learns about it.
+# Called without a subshell, so the variables of report() are updated.
+ensure_health_label() {
+  label_id=$(linear_ensure_label "$team_id" "$LABEL" "$(jq -c '.team.labels.nodes // []' <<<"$ctx")")
+  if [ -n "$label_id" ] && [ -z "$(jq -r --arg l "$LABEL" '[.team.labels.nodes[] | select(.name == $l)][0].id // empty' <<<"$ctx")" ]; then
+    ctx=$(jq -c --arg id "$label_id" --arg l "$LABEL" '.team.labels.nodes += [{id: $id, name: $l, parent: null}]' <<<"$ctx")
+  fi
+}
+
 report() {
-  local ctx project_id team_id open res id existing uuid ident spec body count=0
+  local ctx project_id team_id open res id existing uuid ident spec body lid label_id count=0
   ctx=$(linear_project_context "$HEALTH_PROJECT" 2>/dev/null) || ctx=""
   project_id=$(jq -r '.id // empty' <<<"$ctx" 2>/dev/null); team_id=$(jq -r '.team.id // empty' <<<"$ctx" 2>/dev/null)
   if [ -z "$project_id" ] || [ -z "$team_id" ]; then
     echo "::error::Linear project '$HEALTH_PROJECT' not found or Linear unreachable; the results could not be reported."
     print_results; return 1
   fi
-  open=$(linear_open_issues_with_label "$team_id" "$project_id" "$LABEL") || { echo "::error::Could not read the open health tickets"; return 1; }
+  open=$(linear_open_issues_in_project "$team_id" "$project_id") || { echo "::error::Could not read the open health tickets"; return 1; }
 
   while IFS= read -r res; do
     id=$(jq -r .id <<<"$res")
@@ -87,10 +96,19 @@ report() {
     spec=$(ticket_spec "$res"); body=$(issue_format "$spec")
     if [ -n "$uuid" ]; then
       linear_set_description "$uuid" "$body"
+      # Found by its marker, with or without the label: add the label when it is missing.
+      if ! jq -e --arg l "$LABEL" '.labels | index($l)' <<<"$existing" >/dev/null; then
+        ensure_health_label; lid=$label_id
+        if [ -n "$lid" ]; then
+          linear_gql 'mutation($id: String!, $l: String!) { issueAddLabel(id: $id, labelId: $l) { success } }' \
+            "$(jq -n --arg id "$uuid" --arg l "$lid" '{id: $id, l: $l}')" >/dev/null || echo "::warning::Could not add label $LABEL to $ident"
+        else echo "::warning::Could not find or create label $LABEL"; fi
+      fi
       echo "$ident: still failing '$id', updated"
       continue
     fi
     local created
+    ensure_health_label   # before the ticket, so the first ticket of a new kind gets the label too
     created=$(issue_write "$spec" "$ctx" 2>/dev/null | sed -n 's/^created //p') || created=""
     if [ -n "$created" ]; then echo "created $created for '$id'"; count=$((count + 1)); else echo "::error::Could not create the ticket for '$id'"; FAILED=1; fi
   done < <(jq -c . "$RESULTS")

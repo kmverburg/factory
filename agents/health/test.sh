@@ -23,7 +23,7 @@ cat > "$tmp/wrangler.jsonc" <<'J'
   "vars": { // c
     "PROJECT_REPOS": { "Factory": "factory", "Backpack": "backpack" } } }
 J
-echo '[{"project":"Backpack","repo":"backpack","worker":"backpack"}]' > "$tmp/apps.json"
+echo '[{"project":"Backpack","repo":"backpack","worker":"backpack","cloudflare":{"required_check":"check"}}]' > "$tmp/apps.json"
 
 cat > "$tmp/bin/gh" <<'GH'
 #!/usr/bin/env bash
@@ -31,11 +31,13 @@ echo "$*" >> "$GH_LOG"
 case "$*" in
   "api --paginate installation/repositories"*) printf 'o/factory\no/backpack\n' ;;
   *"contents/.github/workflows/factory.yml"*) { echo "# header"; awk 'f || !/^#/ { f = 1; print }' "$TPL"; } | base64 -w0 ;;
-  *"/rules/branches/main"*) printf 'build\nWorkers Builds: backpack\n' ;;
+  *"repos/o/factory/rules/branches/main"*) printf 'build\nWorkers Builds: factory\n' ;;
+  *"/rules/branches/main"*) printf '%s\n' "${BACKPACK_REQUIRED:-check}" ;;
   *"required_status_checks"*) exit 1 ;;
   *"--jq .allow_auto_merge") echo "${AUTO_MERGE:-true}" ;;
   *"/actions/workflows/"*) ;;
-  *"/check-runs"*) echo "Workers Builds: backpack" ;;
+  *"repos/o/factory/commits"*"/check-runs"*) echo "Workers Builds: factory" ;;
+  *"/check-runs"*) printf 'check\nDeploy / check\n' ;;
   *"/status"*) ;;
   "pr list"*) echo '[{"number":9,"headRefName":"kv-1-thing","mergedAt":"2020-01-01T00:00:00Z"}]' ;;
 esac
@@ -53,12 +55,15 @@ case "$url" in
   */health) reply 200 '{"ok":true}' ;;
   *"/health?deep=1") if [ -n "$RELAY_BAD" ]; then reply 503 '{"ok":false,"github":401,"linear":200,"repos":{}}'; else reply 200 '{"ok":true}'; fi ;;
   *tokens/verify) reply 200 '{"result":{"status":"active"}}' ;;
-  */workers/scripts) reply 200 '{"result":[{"id":"backpack","tag":"tb"},{"id":"factory","tag":"tf"}]}' ;;
+  */workers/scripts*) reply 200 '{"result":[{"id":"backpack","tag":"tb"},{"id":"factory","tag":"tf"}]}' ;;
   */triggers) reply 200 '{"result":[{"id":"t"}]}' ;;
   https://api.linear.app/graphql)
     case "$data" in
       *viewer*) echo '{"data":{"viewer":{"id":"u"}}}' ;;
-      *"projects(first"*) echo '{"data":{"projects":{"nodes":[{"id":"p1","name":"Factory","teams":{"nodes":[{"id":"t1","states":{"nodes":[{"id":"s-todo","name":"Todo","type":"unstarted"}]},"labels":{"nodes":[{"id":"o-agent","name":"Agent","parent":{"name":"Origin"}},{"id":"l-health","name":"factory:health","parent":null}]}}]}}]}}}' ;;
+      *"projects(first"*)
+        HL=',{"id":"l-health","name":"factory:health","parent":null}'; [ -z "$NO_HEALTH_LABEL" ] || HL=""
+        echo '{"data":{"projects":{"nodes":[{"id":"p1","name":"Factory","teams":{"nodes":[{"id":"t1","states":{"nodes":[{"id":"s-todo","name":"Todo","type":"unstarted"}]},"labels":{"nodes":[{"id":"o-agent","name":"Agent","parent":{"name":"Origin"}}'"$HL"']}}]}}]}}}' ;;
+      *issueLabelCreate*) echo '{"data":{"issueLabelCreate":{"issueLabel":{"id":"l-new"}}}}' ;;
       *"issues(first: 1"*) echo '{"data":{"issues":{"nodes":[{"id":"i1"}]}}}' ;;
       *"issues(first: 250"*) echo "${OPEN_ISSUES:-$EMPTY}" ;;
       *"identifier state"*) echo '{"data":{"issue":{"identifier":"KV-1","state":{"name":"Done","type":"completed"},"attachments":{"nodes":[{"url":"https://github.com/o/backpack/pull/9"},{"url":"https://github.com/o/factory/pull/9"}]}}}}' ;;
@@ -76,6 +81,8 @@ export LINEAR_API_KEY=lin_api_SECRETSECRETSECRETSECRET1234 CLAUDE_CODE_OAUTH_TOK
 export CLOUDFLARE_ACCOUNT_ID=0123456789abcdef0123456789abcdef CLOUDFLARE_API_TOKEN=cfsecretcfsecretcfsecretcfsecret1 CLOUDFLARE_BUILDS_TOKEN=cfsecretcfsecretcfsecretcfsecret2 CLOUDFLARE_OBSERVABILITY_TOKEN=cfsecretcfsecretcfsecretcfsecret3
 export HEALTH_CHECK_SECRET=healthsecrethealthsecret FACTORY_APP_ID=123 FACTORY_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----" APP_TOKEN_OUTCOME=success
 run() { : > "$GH_LOG"; : > "$CURL_LOG"; bash "$here/health.sh" "$@" > "$tmp/out.txt" 2>&1 || echo "exit $?" >> "$tmp/out.txt"; }
+
+fcount() { tr '\n' ' ' < "$CURL_LOG" | grep -oP -- "$1" | wc -l | tr -d ' '; }
 mutations() { count "$1" "$CURL_LOG"; }
 
 run
@@ -94,7 +101,7 @@ AUTO_MERGE=false run --dry-run
 check "dry run: prints the failure" 1 "$(count 'FAIL  github-backpack' "$tmp/out.txt")"
 check "dry run: creates and updates nothing" 0 "$(mutations 'issueCreate\|issueUpdate\|commentCreate')"
 
-OPEN='{"data":{"issues":{"nodes":[{"id":"u9","identifier":"KV-50","description":"x\n\nHealth check: `github-backpack`\nHealth status: failing (checked 2026-01-01)"}]}}}'
+OPEN='{"data":{"issues":{"nodes":[{"id":"u9","identifier":"KV-50","labels":{"nodes":[{"name":"factory:health"}]},"description":"x\n\nHealth check: `github-backpack`\nHealth status: failing (checked 2026-01-01)"}]}}}'
 OPEN_ISSUES=$OPEN AUTO_MERGE=false run
 check "repeat: only the repo without a ticket gets a new one" 1 "$(mutations issueCreate)"
 check "repeat: updates the existing ticket" 1 "$(count 'issueUpdate' "$CURL_LOG")"
@@ -102,9 +109,39 @@ check "repeat: updates the existing ticket" 1 "$(count 'issueUpdate' "$CURL_LOG"
 OPEN_ISSUES=$OPEN run
 check "resolved: comments once on the ticket" 1 "$(count 'commentCreate' "$CURL_LOG")"
 check "resolved: marks the ticket resolved" 1 "$(count 'Health status: resolved (checked 2026-01-02)' "$CURL_LOG")"
-RESOLVED='{"data":{"issues":{"nodes":[{"id":"u9","identifier":"KV-50","description":"Health check: `github-backpack`\nHealth status: resolved (checked 2026-01-01)"}]}}}'
+RESOLVED='{"data":{"issues":{"nodes":[{"id":"u9","identifier":"KV-50","labels":{"nodes":[{"name":"factory:health"}]},"description":"Health check: `github-backpack`\nHealth status: resolved (checked 2026-01-01)"}]}}}'
 OPEN_ISSUES=$RESOLVED run
 check "resolved: no second comment the next day" 0 "$(count 'commentCreate' "$CURL_LOG")"
+
+check "repeat: a labelled ticket is not labelled again" 0 "$(count 'issueAddLabel' "$CURL_LOG")"
+
+# An existing ticket without the label (the first run created them without it): found by its marker, updated, label added.
+UNLABELLED='{"data":{"issues":{"nodes":[{"id":"u9","identifier":"KV-64","labels":{"nodes":[]},"description":"x\n\nHealth check: `github-backpack`\nHealth status: failing (checked 2026-01-01)"}]}}}'
+OPEN_ISSUES=$UNLABELLED AUTO_MERGE=false run
+check "unlabelled: no duplicate ticket for the same problem" 1 "$(mutations issueCreate)"
+check "unlabelled: the existing ticket is updated" 1 "$(count 'issueUpdate' "$CURL_LOG")"
+check "unlabelled: the label is added to it" 1 "$(fcount 'issueAddLabel.{0,300}?"id": "u9",\s+"l": "l-health"')"
+# The label does not exist yet: it is created, then added.
+NO_HEALTH_LABEL=1 OPEN_ISSUES=$UNLABELLED AUTO_MERGE=false run
+check "missing label: created once" 1 "$(count 'issueLabelCreate' "$CURL_LOG")"
+check "missing label: then added to the existing ticket" 1 "$(fcount 'issueAddLabel.{0,300}?"id": "u9",\s+"l": "l-new"')"
+# A new ticket of a new kind gets its label too (created before the ticket).
+NO_HEALTH_LABEL=1 AUTO_MERGE=false run
+check "new kind: the label is created once, not per ticket" 1 "$(count 'issueLabelCreate' "$CURL_LOG")"
+check "new kind: both tickets are created with the new label" 2 "$(fcount 'issueCreate.{0,3000}?"labelIds": \[[^]]*"l-new"')"
+
+# Per-app Cloudflare checks: Backpack deploys through GitHub Actions (its \`check\` job), the factory through Workers Builds.
+run --dry-run
+check "apps: Backpack's check job and the factory's Workers Builds both pass" 0 "$(count 'FAIL  cloudflare-' "$tmp/out.txt")"
+check "apps: no Workers Builds needed for Backpack (never asks for it)" 0 "$(count 'Workers Builds: …' "$tmp/out.txt")"
+BACKPACK_REQUIRED=build run --dry-run
+check "apps: Backpack without the check job required fails" 1 "$(count 'FAIL  cloudflare-backpack' "$tmp/out.txt")"
+check "apps: the factory is not affected by that" 0 "$(count 'FAIL  cloudflare-factory' "$tmp/out.txt")"
+BACKPACK_REQUIRED='Deploy / check' run --dry-run
+check "apps: a workflow-prefixed check job counts" 0 "$(count 'FAIL  cloudflare-' "$tmp/out.txt")"
+echo '[{"project":"Backpack","repo":"backpack","worker":"backpack"}]' > "$tmp/apps-nocf.json"
+APPS_FILE="$tmp/apps-nocf.json" run --dry-run
+check "apps: without a cloudflare setting an app needs Workers Builds" 1 "$(count 'FAIL  cloudflare-backpack' "$tmp/out.txt")"
 
 RELAY_BAD=1 run
 check "relay: invalid GitHub token becomes a ticket" 1 "$(count 'Factory health: the relay is not healthy' "$CURL_LOG")"

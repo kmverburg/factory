@@ -15,6 +15,7 @@ while [ $# -gt 0 ]; do case "$1" in -d) data=$2; shift ;; esac; shift; done
 echo "$data" | jq -c . >> "$CURL_LOG"
 case "$data" in
   *"projects(first"*) echo '{"data":{"projects":{"nodes":[{"id":"p-bp","name":"Backpack","teams":{"nodes":[{"id":"t1","states":{"nodes":[{"id":"s-triage","name":"Triage","type":"triage"}]},"labels":{"nodes":[{"id":"o-human","name":"Human","parent":{"name":"Origin"}}]}}]}}]}}}' ;;
+  *issueLabelCreate*) echo '{"data":{"issueLabelCreate":{"issueLabel":{"id":"l-new"}}}}' ;;
   *"issue(id"*) echo '{"data":{"issue":{"id":"uuid-7","identifier":"KV-7","url":"https://linear.app/KV-7","labels":{"nodes":[{"id":"o-human","name":"Human","parent":{"name":"Origin"}},{"id":"l-keep","name":"Idea","parent":null}]},"team":{"states":{"nodes":[]}}}}}' ;;
   *) echo '{"data":{"ok":true}}' ;;
 esac
