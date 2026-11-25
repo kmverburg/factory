@@ -12,6 +12,7 @@
 #     "acceptance": ["…"], "out_of_scope": ["…"], "agent_notes": "…", "related": ["KV-1"],
 #     "footer": "text kept at the bottom (for example Koen's original words)",
 #     "origin": "Agent" (default) | "Human",
+#     "priority": 2,                    optional Linear priority (1 urgent, 2 high, 3 medium, 4 low)
 #     "manual": true,                   label factory:manual, assigned to Koen (FACTORY_OWNER_EMAIL)
 #     "delivery": "Human involved" | "Autonomous",   only when known
 #     "state": "triage" (Todo if the team has no triage) | "todo" | "blocked" | "needs human",
@@ -128,11 +129,13 @@ issue_write() {
 
   desc=$(issue_format "$spec")
   input=$(jq -n --arg t "$team_id" --arg ti "$title" --arg d "$desc" --arg s "$state_id" --arg p "$project_id" --arg a "$assignee" \
+    --argjson pr "$(jq -c '.priority // null' <<<"$spec")" \
     --argjson l "$(printf '%s\n' "${label_ids[@]}" | jq -R . | jq -sc 'map(select(. != ""))')" \
     '{teamId: $t, title: $ti, description: $d, labelIds: $l}
      + (if $s != "" then {stateId: $s} else {} end)
      + (if $p != "" then {projectId: $p} else {} end)
-     + (if $a != "" then {assigneeId: $a} else {} end)')
+     + (if $a != "" then {assigneeId: $a} else {} end)
+     + (if ($pr | type) == "number" then {priority: $pr} else {} end)')
   if [ -n "$update" ]; then
     # Rewrite in place: keep the labels the ticket already has, and its state unless one was asked for.
     existing=$(linear_issue "$update" 2>/dev/null) || existing=""

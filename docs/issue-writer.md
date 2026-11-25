@@ -22,6 +22,7 @@ footer                    (for example the signature, or Koen's original words)
 |---|---|
 | **Labels** | **Origin** (Agent by default, Human for Koen's notes), `factory:manual` for manual work, **Delivery** only when known (`Human involved` or `Autonomous`), plus extra labels (`source:logs`, `factory:follow-up`, …), created when missing. |
 | **Assignee** | Koen (`FACTORY_OWNER_EMAIL`, default `linear@kmverburg.nl`) for manual work, nobody for agent work. |
+| **Priority** | `priority` (Linear: 1 urgent, 2 high, 3 medium, 4 low) is optional; unset means no priority. |
 | **Status** | `triage` (Todo when the team has no triage), `todo`, `needs human` or `blocked`. `blocked` needs at least one `blocked_by` ticket and gets a *blocked by* relation for each; without one it becomes Todo with a warning. It never uses Agent Ready: Koen moves tickets there. |
 | **Relations** | `blocked_by` (those block the new ticket), `blocks` (the new ticket blocks those, which move to Blocked), `related`. |
 | **Deduplication** | `dedup: true` matches an open ticket in the same project with the same title; `dedup_marker` matches text in the description (a signature). A match gets a comment instead of a new ticket. If the open tickets can't be listed, nothing is created. |

@@ -68,6 +68,10 @@ run "$(jq -c '. + {labels: ["source:logs"]}' <<<"$BASE")"
 check "extra label that doesn't exist is created" 1 "$(grep -c '^labelCreate' "$CALLS")"
 check "extra label is on the ticket" '["o-agent","l-new"]' "$(created_input | jq -c .labelIds)"
 
+# Priority
+check "priority: none by default" null "$(run "$BASE"; created_input | jq -c '.priority // null')"
+run "$(jq -c '. + {priority: 2}' <<<"$BASE")"; check "priority: High when asked" 2 "$(created_input | jq -r .priority)"
+
 # State
 run "$(jq -c '. + {state: "triage"}' <<<"$BASE")"; check "triage: Triage state" s-triage "$(created_input | jq -r .stateId)"
 run "$(jq -c '. + {state: "triage"}' <<<"$BASE")" "$CTX_NO_TRIAGE"; check "triage: Todo when the team has no triage" s-todo "$(created_input | jq -r .stateId)"
