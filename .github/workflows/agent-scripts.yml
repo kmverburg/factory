@@ -1,0 +1,25 @@
+# Checks the factory's agent scripts on every pull request (agents/ci/): syntax, shellcheck, every jq filter,
+# smoke tests of the publish scripts and the existing tests. The check name to require on `main` is "Agent scripts".
+name: Agent scripts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-scripts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  agent-scripts:
+    name: Agent scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check the agent scripts
+        run: bash agents/ci/run.sh
