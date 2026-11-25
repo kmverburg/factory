@@ -3,6 +3,7 @@
     "project": "Backpack",
     "repo": "backpack",
     "worker": "backpack",
+    "cloudflare": {"required_check": "check"},
     "signals": [
       {"name": "Save conflicts", "filters": [{"key": "event", "operation": "eq", "value": "state_conflict"}],
        "measure": "count", "threshold": 5},
@@ -14,6 +15,7 @@
     "project": "Feast",
     "repo": "feast",
     "worker": "feast",
+    "cloudflare": {"required_check": "check"},
     "signals": [
       {"name": "Import job duration (p95 ms)", "filters": [{"key": "event", "operation": "eq", "value": "job_import"}],
        "measure": "p95", "field": "ms", "unit": "ms", "threshold": 120000, "min_count": 5, "floor": 30000},
