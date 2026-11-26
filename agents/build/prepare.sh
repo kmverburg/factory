@@ -27,24 +27,46 @@ else
   else
     jq -r .body <<<"$pr" > .factory/ticket.md
   fi
-  if [ "$FIX_CONFLICT" = "true" ]; then
-    # Start the merge of the base branch and leave the conflicts in the working tree for the builder (KV-49).
-    base=$(jq -r .baseRefName <<<"$pr")
-    git fetch -q origin "$base"
-    git -c user.name="factory-bot" -c user.email="factory-bot@users.noreply.github.com" merge --no-commit --no-ff "origin/$base" </dev/null >/dev/null 2>&1 || true
-    files=$(git diff --name-only --diff-filter=U || true)
-    {
-      printf 'This PR conflicts with `%s`, and the merge of `origin/%s` is started in the working tree (not committed).\n' "$base" "$base"
-      printf 'Resolve the conflicts so that both sides keep their intent: this PR'"'"'s ticket (.factory/ticket.md) and the\n'
-      printf 'commits that landed on `%s` (listed below). Do not run `git commit`; the workflow commits the merge.\n\n' "$base"
-      printf 'Conflicting files:\n%s\n\n' "${files:-(none: the merge was clean or already done)}"
-      printf 'Commits on `%s` since this branch was cut:\n%s\n' "$base" "$(git log --format='- %h %s%n%b' "$(git merge-base HEAD "origin/$base")..origin/$base" | head -80)"
-    } > .factory/review-feedback.md
-  elif [ "$FIX_REQUESTED" = "true" ]; then
-    printf 'Koen asked for these changes in a Linear comment. Do what he says.\n\n%s\n' "$FIX_FEEDBACK" > .factory/review-feedback.md
-  else
-    printf '%s\n' "$FIX_FEEDBACK" > .factory/review-feedback.md
+  # Every fix round starts with the base branch merged into the branch, whatever started the round (KV-80). The merge is
+  # started but not committed: conflicts are left as markers for the builder, a clean merge is what it works on, and the
+  # publish step commits it. Nothing is guessed: "is there a conflict" is answered by git here, not by the builder.
+  base=$(jq -r .baseRefName <<<"$pr")
+  git fetch -q origin "$base"
+  merge_state=clean
+  if git merge-base --is-ancestor "origin/$base" HEAD; then
+    merge_state=uptodate
+  elif ! git -c user.name="factory-bot" -c user.email="factory-bot@users.noreply.github.com" merge --no-commit --no-ff "origin/$base" </dev/null >/dev/null 2>&1; then
+    merge_state=conflict
   fi
+  files=$(git diff --name-only --diff-filter=U || true)
+  [ "$merge_state" != conflict ] || [ -n "$files" ] || merge_state=clean
+  {
+    case "$merge_state" in
+      conflict)
+        printf 'The merge of `origin/%s` into this branch is started in the working tree (not committed) and it CONFLICTS.\n' "$base"
+        printf 'Resolve the conflicts so that both sides keep their intent: this PR'"'"'s ticket (.factory/ticket.md) and the\n'
+        printf 'commits that landed on `%s` (listed below). Remove every conflict marker. Do not run `git commit` or `git merge --abort`;\n' "$base"
+        printf 'the workflow commits the merge, and it must stay a merge of `%s`.\n\nConflicting files:\n%s\n\n' "$base" "$(sed 's/^/- /' <<<"$files")" ;;
+      clean)
+        printf 'The merge of `origin/%s` into this branch is started in the working tree (not committed) and it is CLEAN: no conflicts.\n' "$base"
+        printf 'Work on the merged result. Do not run `git commit` or `git merge --abort`; the workflow commits the merge and pushes it.\n\n' ;;
+      *)
+        printf 'This branch already contains `origin/%s`: nothing to merge.\n\n' "$base" ;;
+    esac
+    if [ "$FIX_CONFLICT" = "true" ]; then
+      printf 'This round was started because the PR conflicts with `%s`; the instructions below come from the update job.\n\n' "$base"
+      printf '%s\n\n' "$FIX_FEEDBACK"
+    elif [ "$FIX_REQUESTED" = "true" ]; then
+      printf 'Koen asked for these changes in a Linear comment. Do what he says.\n\n%s\n\n' "$FIX_FEEDBACK"
+    else
+      printf '%s\n\n' "$FIX_FEEDBACK"
+    fi
+    if [ "$merge_state" != uptodate ]; then
+      printf 'Commits on `%s` since this branch was cut:\n%s\n' "$base" "$(git log --format='- %h %s' "$(git merge-base HEAD "origin/$base")..origin/$base" | head -80)"
+    fi
+  } > .factory/review-feedback.md
+  echo "base=$base" >> "$GITHUB_OUTPUT"
+  echo "merge_state=$merge_state" >> "$GITHUB_OUTPUT"
   checks_collect_failed .factory/checks || echo "::warning::Couldn't collect check details."
   linear_set_state "$ISSUE_IDENTIFIER" "Agent Working"
 fi

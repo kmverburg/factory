@@ -118,6 +118,7 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
           BRANCH: ${{ steps.branch.outputs.name }}
           BASE_SHA: ${{ steps.branch.outputs.base_sha }}
+          BASE_BRANCH: ${{ steps.branch.outputs.base }}
         run: bash "$FACTORY_DIR/agents/build/publish.sh"
 
       - name: Report failure

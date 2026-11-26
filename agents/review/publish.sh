@@ -3,6 +3,7 @@
 set -eo pipefail
 source "$FACTORY_DIR/agents/lib/linear.sh"
 source "$FACTORY_DIR/agents/lib/issue-writer.sh"
+source "$FACTORY_DIR/agents/lib/conflicts.sh"
 source "$FACTORY_DIR/agents/review/workflows.sh"
 v=.factory-review/verdict.json
 pr_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$PR_NUMBER"
@@ -36,6 +37,30 @@ if [ -n "$wf_files" ] && [ "$decision" != "escalate" ]; then
     '.decision = "escalate" | .reasons = ((.reasons // []) + [$w]) | .fix_requests = [] | .categories = ((.categories // []) + ["workflow-change"])' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
   decision=escalate
 fi
+# GitHub's own merge status (gather.sh) and conflict rounds (KV-80). A conflicting PR is never approved: an agent PR with a
+# ticket goes to a conflict round instead. After a conflict round the PR can't conflict any more, and an escalated PR stays
+# escalated (when in doubt it stays so), with what Koen was asked to decide kept from the earlier escalation.
+merge_status=$(jq -r '.mergeable // "UNKNOWN"' .factory-review/merge.json 2>/dev/null || echo UNKNOWN)
+conflict_round=false; [ -f .factory-review/conflict-round ] && conflict_round=true
+was_escalated=false; [ -f .factory-review/was-escalated ] && was_escalated=true
+keep_escalation=false; [ "$conflict_round" = true ] && [ "$was_escalated" = true ] && keep_escalation=true
+escalate_with() { # $1 = reason
+  jq --arg w "$1" '.decision = "escalate" | .reasons = ((.reasons // []) + [$w]) | .fix_requests = []' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
+  decision=escalate
+}
+if [ "$merge_status" = "CONFLICTING" ] && [ "$decision" = "approve" ]; then
+  if [ "$conflict_round" = true ]; then escalate_with "GitHub still reports a merge conflict after the builder's conflict round."
+  elif [ "$AGENT_PR" != "true" ] || [ -z "$IDENTIFIER" ]; then escalate_with "This PR conflicts with its base branch and wasn't opened by the factory (or has no ticket), so it can't be sent to the builder."
+  else decision=conflict; fi
+fi
+if [ "$keep_escalation" = true ] && [ "$decision" != "escalate" ]; then
+  escalate_with "This PR was escalated before; resolving a merge conflict doesn't lift that."
+  prev_decision=$(cat .factory-review/previous-decision.txt 2>/dev/null || true)
+  prev_categories=$(cat .factory-review/previous-categories.txt 2>/dev/null || true)
+  jq --arg d "$prev_decision" --arg c "$prev_categories" '
+    (if $d != "" then .decision_needed = $d else . end)
+    | (if $c != "" then .categories = ($c | split(",")) else . end)' "$v" > "$v.tmp" && mv "$v.tmp" "$v"
+fi
 # Escalation categories: only known ids (categories.json), at least one, so they can be counted (docs/escalation-learning.md).
 # "What you need to decide" is the first thing Koen reads; without one from the reviewer it falls back to the first reason.
 jq --slurpfile c "$FACTORY_DIR/agents/review/categories.json" '
@@ -65,6 +90,17 @@ if [ "$decision" = "approve" ]; then
     merge_note="enabling auto-merge failed: $(printf '%s' "$merge_err" | tr '\n' ' ' | cut -c1-300)"
     echo "::warning::Enabling auto-merge failed."
   fi
+fi
+
+# After a conflict round: which files conflicted, how they were resolved and whether Koen's decision changed (the reviewer's note).
+conflict_md=""
+if [ "$conflict_round" = true ]; then
+  conflict_files=$(cat .factory-review/conflict-files.txt 2>/dev/null || true)
+  conflict_note=$(jq -r '.conflict_note // ""' "$v" | tr '\n' ' ' | cut -c1-500)
+  if [ -n "$conflict_files" ]; then conflict_list=$(sed 's/^/- /' <<<"$conflict_files"); else conflict_list="- (see the builder's comment)"; fi
+  conflict_note=${conflict_note:-"How they were resolved: see the builder's comment above. The reviewer didn't say whether anything changed in what you are asked to decide."}
+  conflict_md=$(printf '**Merge conflict resolved by the builder.** Files that conflicted:\n%s\n\n%s' "$conflict_list" "$conflict_note")
+  [ "$keep_escalation" != true ] || conflict_md=$(printf '%s\n\nThe escalation stays: the PR still needs your decision.' "$conflict_md")
 fi
 
 # Follow-up tickets (Todo), never from a PR that is itself a follow-up.
@@ -114,11 +150,13 @@ done < <(jq -r '[.screenshots // [] | .[] | select(type == "object") | select((.
       echo "### ✅ Factory review: approved (risk: $risk)"
       if [ "$auto_merge" = "true" ]; then echo; echo "Approved, will merge automatically when checks pass."
       else echo; echo "Approved, but not merging automatically: $merge_note."; fi ;;
+    conflict) echo "### 🔧 Factory review: the PR conflicts with its base branch, sending it to the builder (not a fix round, risk: $risk)" ;;
     fix) echo "### 🔧 Factory review: sending fixes to the builder (round $((round + 1)) of $MAX_FIX_ROUNDS, risk: $risk)" ;;
     *) echo "### 🙋 Factory review: needs a human (risk: $risk)" ;;
   esac
   echo
   jq -r '.summary // ""' "$v"
+  if [ -n "$conflict_md" ]; then echo; printf '%s\n' "$conflict_md"; fi
   if [ "$(jq '.reasons // [] | length' "$v")" != "0" ]; then
     echo; echo "**Why:**"; jq -r '.reasons[] | "- \(.)"' "$v"
   fi
@@ -131,7 +169,7 @@ done < <(jq -r '[.screenshots // [] | .[] | select(type == "object") | select((.
   echo; echo "**Checks:** $(jq -r '.checks // "not reported"' "$v")"
   echo; printf '%s\n' "$preview_md"
   # Hidden marker: lets learn.sh count what Koen approves unchanged, by reason.
-  [ "$decision" != escalate ] || printf '\n<!-- factory-escalation: %s -->\n' "$categories"
+  [ "$decision" != escalate ] || [ "$keep_escalation" = true ] || printf '\n<!-- factory-escalation: %s -->\n' "$categories"
 } > "$RUNNER_TEMP/comment.md"
 gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/comment.md"
 
@@ -140,6 +178,7 @@ gh label create agent-fixing --color FBCA04 --description "Builder agent is appl
 gh label create needs-human --color D93F0B --description "Factory wants a human to look" --force >/dev/null
 follow_note=""
 [ -n "$created" ] && follow_note=$(printf '\n\nFollow-up and manual tickets created:\n%s' "$created")
+[ -z "$conflict_md" ] || follow_note=$(printf '%s\n\n%s' "$follow_note" "$conflict_md")
 
 case "$decision" in
   approve)
@@ -158,6 +197,22 @@ $preview_md"
       if [ "$auto_merge" = "true" ]; then linear_set_group_label "$IDENTIFIER" Delivery Autonomous
       else linear_set_group_label "$IDENTIFIER" Delivery "Human involved"; fi
     fi
+    ;;
+  conflict)
+    # Not a fix round: the round number stays. needs-human, if the PR has it, stays too.
+    gh pr edit "$PR_NUMBER" --add-label agent-fixing --remove-label agent-approved
+    conflict_files=$(cat .factory-review/conflicting-files.txt 2>/dev/null || true)
+    [ -n "$conflict_files" ] || conflict_files="(GitHub did not list them)"
+    base=$(jq -r '.baseRefName // "the base branch"' .factory-review/pr.json)
+    jq -n --arg pr "$PR_NUMBER" --arg round "$round" --arg id "$IDENTIFIER" \
+      --arg fb "GitHub reports that this PR conflicts with $base. Resolve the conflicts (the merge is started in the working tree)." \
+      '{event_type: "factory-fix", client_payload: {pr_number: $pr, round: $round, identifier: $id, conflict: "true", feedback: $fb}}' \
+      > "$RUNNER_TEMP/dispatch.json"
+    gh api "repos/$GITHUB_REPOSITORY/dispatches" --input "$RUNNER_TEMP/dispatch.json"
+    conflict_found "$IDENTIFIER" "$conflict_files" "The reviewer sent $pr_url to the builder to resolve them; the ticket moves back when it is done."
+    linear_comment "$IDENTIFIER" "🔧 The reviewer found that $pr_url conflicts with its base branch and sent it to the builder (not a fix round).$follow_note
+
+$preview_md"
     ;;
   fix)
     gh pr edit "$PR_NUMBER" --add-label agent-fixing --remove-label needs-human --remove-label agent-approved

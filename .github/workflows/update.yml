@@ -21,6 +21,9 @@ on:
         required: false
       FACTORY_APP_PRIVATE_KEY:
         required: false
+      # Moves tickets to and from the Linear status Conflicts (KV-80); without it Linear isn't touched.
+      LINEAR_API_KEY:
+        required: false
 
 jobs:
   update:
@@ -60,6 +63,7 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
           BASE_BRANCH: ${{ inputs.base_branch }}
           PR_NUMBER: ${{ inputs.pr_number }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         run: |
           git remote set-url origin "https://github.com/$GITHUB_REPOSITORY.git"
           bash "$FACTORY_DIR/agents/update/update.sh"

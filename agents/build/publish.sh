@@ -3,6 +3,7 @@
 set -eo pipefail
 source "$FACTORY_DIR/agents/lib/linear.sh"
 source "$FACTORY_DIR/agents/lib/issue-writer.sh"
+source "$FACTORY_DIR/agents/lib/conflicts.sh"
 run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 gh label create needs-human --color D93F0B --description "Factory wants a human to look" --force >/dev/null
 
@@ -46,8 +47,10 @@ elif [ "$FIX_REQUESTED" = "true" ]; then
 else
   message="$ISSUE_IDENTIFIER: address review feedback (round $FIX_ROUND)"
 fi
-# A merge-conflict fix must not push conflict markers.
-if [ "$FIX_CONFLICT" = "true" ] && git diff --name-only --diff-filter=U | xargs -r grep -lE '^<<<<<<< ' >/dev/null 2>&1; then
+# Every fix round starts with a merge of the base branch (prepare.sh), which can leave conflict markers: never push them.
+marker_files=""
+if [ "$EVENT_TYPE" = "factory-fix" ]; then marker_files=$({ { git diff --name-only --diff-filter=U; git diff HEAD --name-only; } | sort -u | xargs -r grep -lE '^<<<<<<< ' | xargs -r grep -lE '^>>>>>>> '; } 2>/dev/null || true); fi
+if [ -n "$marker_files" ]; then
   gh pr comment "$PR_NUMBER" --body "🏭 The builder agent left merge conflict markers in place, so nothing was pushed. Run: $run_url"
   gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-fixing
   linear_comment "$ISSUE_IDENTIFIER" "🏭 The builder agent couldn't resolve the merge conflicts on the pull request. Run: $run_url"
@@ -67,6 +70,21 @@ if [ "$(git rev-list --count "$BASE_SHA"..HEAD)" = "0" ]; then
   linear_comment "$ISSUE_IDENTIFIER" "🏭 The builder agent finished without changing any code. Run: $run_url"
   linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
   linear_set_group_label "$ISSUE_IDENTIFIER" Delivery "Human involved"
+  exit 0
+fi
+
+# $1 = what went wrong. A conflict round that didn't really merge counts as failed: says so instead of reporting success.
+conflict_round_failed() {
+  gh pr comment "$PR_NUMBER" --body "🏭 The conflict round failed: $1 The PR needs a human. Run: $run_url"
+  gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-fixing
+  linear_comment "$ISSUE_IDENTIFIER" "🏭 The builder's merge conflict round failed: $1 A human needs to look at the pull request. Run: $run_url"
+  linear_set_state "$ISSUE_IDENTIFIER" "Needs Human"
+  linear_set_group_label "$ISSUE_IDENTIFIER" Delivery "Human involved"
+}
+# The base branch must be part of the branch's history (a real merge), not just an edit that looks like its result.
+# origin/<base> is the ref prepare.sh merged, so a base that moved on in the meantime doesn't fail the round.
+if [ "$FIX_CONFLICT" = "true" ] && [ -n "$BASE_BRANCH" ] && ! git merge-base --is-ancestor "origin/$BASE_BRANCH" HEAD; then
+  conflict_round_failed "the branch doesn't contain \`$BASE_BRANCH\` after the round (the builder changed files without merging it), so nothing was pushed."
   exit 0
 fi
 
@@ -94,12 +112,28 @@ if [ "$EVENT_TYPE" = "factory-build" ]; then
 else
   git push origin "$BRANCH"
   pr_number="$PR_NUMBER"
+  # GitHub must agree that the conflict is gone (it needs a moment to work it out after a push).
+  if [ "$FIX_CONFLICT" = "true" ]; then
+    mergeable=UNKNOWN
+    for _ in $(seq 1 "${MERGEABLE_TRIES:-12}"); do
+      mergeable=$(gh pr view "$PR_NUMBER" --json mergeable -q .mergeable 2>/dev/null || echo UNKNOWN)
+      [ "$mergeable" != "UNKNOWN" ] && break
+      sleep "${MERGEABLE_WAIT:-5}"
+    done
+    if [ "$mergeable" = "CONFLICTING" ]; then
+      conflict_round_failed "the merge was pushed, but GitHub still reports a conflict with \`$BASE_BRANCH\`."
+      exit 0
+    fi
+  fi
   if [ "$FIX_CONFLICT" = "true" ]; then fix_title="Builder resolved merge conflicts with the base branch"
   elif [ "$FIX_REQUESTED" = "true" ]; then fix_title="Builder applied the changes Koen asked for"; else fix_title="Builder applied review fixes (round $FIX_ROUND)"; fi
   { echo "### 🔧 $fix_title"; echo; cat "$body_file"; } > "$RUNNER_TEMP/fix_comment.md"
   gh pr comment "$pr_number" --body-file "$RUNNER_TEMP/fix_comment.md"
   if [ "$FIX_CONFLICT" = "true" ]; then
     linear_comment "$ISSUE_IDENTIFIER" "🔧 Builder resolved the merge conflicts with the base branch and pushed. The reviewer agent is checking again."
+    # Back to the status the ticket had before the conflict; the reviewer's verdict then decides as usual.
+    if gh pr view "$PR_NUMBER" --json labels -q '[.labels[].name] | index("needs-human") != null' 2>/dev/null | grep -qx true; then escalated=true; else escalated=false; fi
+    linear_set_state "$ISSUE_IDENTIFIER" "$(conflict_home_state "$escalated")"
   elif [ "$FIX_REQUESTED" = "true" ]; then
     linear_comment "$ISSUE_IDENTIFIER" "🔧 Builder pushed the changes you asked for. The reviewer agent is checking again."
   else

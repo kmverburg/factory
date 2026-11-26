@@ -26,6 +26,7 @@ const STATES = [
   { id: "s-human", name: "Needs Human" },
   { id: "s-todo", name: "Todo" },
   { id: "s-blocked", name: "Blocked" },
+  { id: "s-conflicts", name: "Conflicts" },
 ];
 
 interface Call {
@@ -220,6 +221,14 @@ describe("event filtering", () => {
 
   it("does nothing when the issue isn't in Agent Ready", async () => {
     issue = makeIssue({ state: { id: "s-working", name: "Agent Working" } });
+    await send(stateChange());
+    expect(githubCalls()).toHaveLength(0);
+    expect(stateUpdates()).toHaveLength(0);
+    expect(comments()).toHaveLength(0);
+  });
+
+  it.each(["Conflicts", "conflicts"])("never starts a build for a ticket in the status %j", async (name) => {
+    issue = makeIssue({ state: { id: "s-conflicts", name } });
     await send(stateChange());
     expect(githubCalls()).toHaveLength(0);
     expect(stateUpdates()).toHaveLength(0);

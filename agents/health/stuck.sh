@@ -155,6 +155,9 @@ check_prs() {
     state_type=$(jq -r '.data.issue.state.type // empty' <<<"$issue" 2>/dev/null); state_name=$(jq -r '.data.issue.state.name // empty' <<<"$issue" 2>/dev/null)
     case "$state_type" in completed|canceled|"") continue ;; esac
     if [ "$(tr '[:upper:]' '[:lower:]' <<<"$state_name")" = "needs human" ]; then continue; fi
+    # In Conflicts (KV-80): a conflict round is running (the PR is agent-fixing, which has a verdict label anyway) or the
+    # conflict is left to Koen on purpose. Never a missing verdict.
+    if [ "$(tr '[:upper:]' '[:lower:]' <<<"$state_name")" = "conflicts" ]; then continue; fi
     last=$(jq -c '[.[] | select(.status == "completed")] | sort_by(.created) | last // empty' <<<"$mine")
     link=$(run_link "$last")
     comments=$(linear_issue_comments "$id" 2>/dev/null) || comments="[]"
@@ -204,6 +207,16 @@ while IFS=$'\t' read -r repo project _; do
     [ -n "$t" ] || continue
     check_ticket "$repo" "$(jq -r .identifier <<<"$t")" "$(jq -r .updatedAt <<<"$t")" "$runs"
   done < <(jq -c '.[]' <<<"$tickets")
+  # Tickets in Conflicts count as busy while a conflict round is running (the PR has agent-fixing). If that round died
+  # before it moved the ticket on, it is handled like a stuck Agent Working ticket; conflicts left to Koen are not touched.
+  ctickets=$(linear_issues_in_state "$team_id" "$project_id" "Conflicts" 2>/dev/null) || ctickets="[]"
+  [ -n "$ctickets" ] || ctickets="[]"
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    cid=$(jq -r .identifier <<<"$t")
+    jq -e --arg id "$cid" '.[] | select((.headRefName | ascii_downcase | startswith(($id | ascii_downcase) + "-")) and (.labels | map(.name) | index("agent-fixing")))' <<<"$PRS" >/dev/null || continue
+    check_ticket "$repo" "$cid" "$(jq -r .updatedAt <<<"$t")" "$runs"
+  done < <(jq -c '.[]' <<<"$ctickets")
   check_prs "$repo" "$runs"
 done < <(list_repos)
 exit 0

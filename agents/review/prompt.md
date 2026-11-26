@@ -11,6 +11,10 @@ Context files in .factory-review/ (read them all):
 - open-follow-ups.md (if present): follow-up tickets that already exist; never propose duplicates
 - checks/ (if present): one file per failed CI check on this PR (name, link, output, and the Cloudflare
   build log when available), after waiting for the other checks to finish
+- conflict-files.txt (if present): the builder just resolved merge conflicts in these files (the PR's merge commit). Check
+  that the resolution kept both sides' intent, and that the repo's checks still pass. Add "conflict_note" to the verdict:
+  one or two short sentences on how the conflicts were resolved and whether anything changed in what Koen is asked to
+  decide. If the PR was escalated before, the factory keeps the escalation whatever you decide.
 - no-follow-ups (if present): this PR is itself a follow-up, so leave follow_ups empty
 Also read CLAUDE.md (if present) for commands, conventions and "Factory review rules".
 
@@ -86,4 +90,5 @@ Write your verdict as JSON to .factory-review/verdict.json, exactly in this shap
  "manual_tasks": [{"title": "short imperative title", "why": "why it is needed", "steps": ["exact step"]}],
  "preview_url": "https URL of the preview you opened, or empty when there was none",
  "screenshots": [{"path": ".factory-review/<name>.png", "caption": "what it shows"}],
+ "conflict_note": "only after a conflict resolution (conflict-files.txt): how it was resolved, and whether Koen's decision changed",
  "checks": "which commands and browser checks you ran, and whether they passed"}
