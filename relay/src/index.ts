@@ -177,7 +177,12 @@ function isNewCommentEvent(payload: any): boolean {
 // ---------- Commands in Linear comments ----------
 
 /** Every comment the factory writes starts with one of these, so the relay never reads them as commands. */
-const FACTORY_MARKERS = ["🏭", "🔧", "✅", "🙋", "💥", "🤔"];
+const FACTORY_MARKERS = ["🏭", "🔧", "✅", "🙋", "💥", "🤔", "⏳", "🔁", "ℹ️", "⚠️"];
+/** A comment matching a factory comment from this long ago is the factory's own, even without a marker. */
+const ECHO_WINDOW_MS = 10 * 60 * 1000;
+/** At most one comment-requested fix round per ticket in this time. */
+const FIX_ROUND_WINDOW_MS = 2 * 60 * 1000;
+const FIX_ROUND_REPLY = "🏭 🔧 Sending your comment to the builder as a fix round";
 const ANSWERS_HEADING = "## Answers from Koen";
 
 type Command = { kind: "approve" } | { kind: "change"; instructions: string };
@@ -216,6 +221,44 @@ async function findOpenPr(repo: string, identifier: string, env: Env): Promise<P
   return null;
 }
 
+const stripMarkers = (text: string): string => {
+  let t = text.trim();
+  for (let again = true; again; ) {
+    again = false;
+    for (const m of FACTORY_MARKERS) if (t.startsWith(m)) { t = t.slice(m.length).trim(); again = true; }
+  }
+  return t.replace(/\s+/g, " ");
+};
+
+/** The factory's comments on an issue from the last 10 minutes (the ones starting with a marker). Empty when Linear can't be read. */
+async function recentFactoryComments(issueId: string, env: Env): Promise<{ body: string; at: number }[]> {
+  try {
+    const data = await linear<{ issue: { comments: { nodes: { body: string; createdAt: string }[] } } | null }>(
+      `query Recent($id: String!) {
+        issue(id: $id) { comments(first: 50, orderBy: createdAt) { nodes { body createdAt } } }
+      }`,
+      { id: issueId },
+      env,
+    );
+    return (data.issue?.comments.nodes ?? [])
+      .map((c) => ({ body: c.body.trim(), at: Date.parse(c.createdAt) }))
+      .filter((c) => FACTORY_MARKERS.some((m) => c.body.startsWith(m)) && Date.now() - c.at < ECHO_WINDOW_MS);
+  } catch (err) {
+    console.error("Recent comments lookup failed", String(err));
+    return [];
+  }
+}
+
+/** True when the comment is a factory comment minus its marker (or a long piece of one). */
+function isEcho(body: string, factoryComments: { body: string }[]): boolean {
+  const text = stripMarkers(body).replace(/\s+/g, " ");
+  if (!text) return false;
+  return factoryComments.some((c) => {
+    const f = stripMarkers(c.body);
+    return f === text || (text.length >= 20 && f.includes(text));
+  });
+}
+
 async function handleComment(data: { id?: string; issueId: string; body: string }, env: Env): Promise<void> {
   const body = data.body.trim();
   if (FACTORY_MARKERS.some((m) => body.startsWith(m))) return;
@@ -223,6 +266,17 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
   const command = parseCommand(body);
   const issue = await getIssue(data.issueId, env);
   if (!issue) return;
+  if (command) {
+    const recent = await recentFactoryComments(issue.id, env);
+    if (isEcho(body, recent)) {
+      console.log(`${issue.identifier}: comment ignored, it repeats a factory comment`);
+      return;
+    }
+    if (command.kind === "change" && recent.some((c) => c.body.startsWith(FIX_ROUND_REPLY) && Date.now() - c.at < FIX_ROUND_WINDOW_MS)) {
+      console.log(`${issue.identifier}: comment ignored, a fix round was started less than 2 minutes ago`);
+      return;
+    }
+  }
   const awaitingAnswer = sameName(issue.state.name, env.NEEDS_HUMAN_STATE);
   if (!command) return;
 
@@ -286,7 +340,7 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
     await addComment(issue.id, `🏭 Couldn't start a fix round on ${pr.html_url}: ${dispatchFailureMessage(repo, response.status, env)}`, env);
     return;
   }
-  await addComment(issue.id, `🏭 🔧 Sending your comment to the builder as a fix round on ${pr.html_url}. This round doesn't count towards the automatic limit.`, env);
+  await addComment(issue.id, `${FIX_ROUND_REPLY} on ${pr.html_url}. This round doesn't count towards the automatic limit.`, env);
 }
 
 /** The builder asked questions and there is no PR yet: put the comment in the description and send the ticket back to the builder. */
@@ -647,7 +701,7 @@ async function addComment(issueId: string, body: string, env: Env): Promise<void
     `mutation Comment($issueId: String!, $body: String!) {
       commentCreate(input: { issueId: $issueId, body: $body }) { success }
     }`,
-    { issueId, body },
+    { issueId, body: FACTORY_MARKERS.some((m) => body.startsWith(m)) ? body : `🏭 ${body}` },
     env,
   );
 }

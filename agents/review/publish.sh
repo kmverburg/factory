@@ -173,7 +173,7 @@ $preview_md"
   *)
     gh pr edit "$PR_NUMBER" --add-label needs-human --remove-label agent-approved --remove-label agent-fixing
     if [ -n "$IDENTIFIER" ]; then
-      linear_comment "$IDENTIFIER" "$(printf '**What you need to decide:** %s\n\n🙋 Reviewer agent wants you to look at %s\n\n' "$decide" "$pr_url"; jq -r '.reasons[]? | "- \(.)"' "$v"; printf '%s\n\n%s' "$follow_note" "$preview_md")"
+      linear_comment "$IDENTIFIER" "$(printf '🙋 **What you need to decide:** %s\n\nReviewer agent wants you to look at %s\n\n' "$decide" "$pr_url"; jq -r '.reasons[]? | "- \(.)"' "$v"; printf '%s\n\n%s' "$follow_note" "$preview_md")"
       if [ -n "$manual_created" ]; then linear_set_state "$IDENTIFIER" "Blocked"; else linear_set_state "$IDENTIFIER" "Needs Human"; fi
       linear_set_group_label "$IDENTIFIER" Delivery "Human involved"
     fi

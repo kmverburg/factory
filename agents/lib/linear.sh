@@ -27,13 +27,24 @@ linear_set_state() {
     "$(jq -n --arg id "$uuid" --arg s "$state_id" '{id: $id, s: $s}')" >/dev/null \
     || echo "::warning::Linear state update failed"
 }
+# Every comment the factory writes starts with one of these; the relay never reads such a comment as Koen's command.
+# Keep in sync with FACTORY_MARKERS in relay/src/index.ts.
+FACTORY_COMMENT_MARKERS=("🏭" "🔧" "✅" "🙋" "💥" "🤔" "⏳" "🔁" "ℹ️" "⚠️")
+# $1 = comment body. Prints it, with "🏭 " in front when it doesn't start with a marker.
+linear_mark() {
+  local m
+  for m in "${FACTORY_COMMENT_MARKERS[@]}"; do
+    case "$1" in "$m"*) printf '%s' "$1"; return 0 ;; esac
+  done
+  printf '🏭 %s' "$1"
+}
 # $1 = issue, $2 = markdown body
 linear_comment() {
   local uuid
   uuid=$(linear_issue "$1" | jq -r '.data.issue.id // empty') || true
   [ -n "$uuid" ] || { echo "::warning::Linear issue $1 not found"; return 0; }
   linear_gql 'mutation($i: String!, $b: String!) { commentCreate(input: { issueId: $i, body: $b }) { success } }' \
-    "$(jq -n --arg i "$uuid" --arg b "$2" '{i: $i, b: $b}')" >/dev/null \
+    "$(jq -n --arg i "$uuid" --arg b "$(linear_mark "$2")" '{i: $i, b: $b}')" >/dev/null \
     || echo "::warning::Linear comment failed"
 }
 # $1 = labels JSON [{id, name, parent: {name}}], $2 = group, $3 = label. Prints the id of that label inside that group, or nothing.
@@ -112,7 +123,7 @@ linear_create_issue() {
 # $1 = issue uuid, $2 = markdown body
 linear_comment_on_id() {
   linear_gql 'mutation($i: String!, $b: String!) { commentCreate(input: { issueId: $i, body: $b }) { success } }' \
-    "$(jq -n --arg i "$1" --arg b "$2" '{i: $i, b: $b}')" >/dev/null \
+    "$(jq -n --arg i "$1" --arg b "$(linear_mark "$2")" '{i: $i, b: $b}')" >/dev/null \
     || echo "::warning::Linear comment failed"
 }
 # $1 = project id. Prints the project's latest updates as a JSON array [{createdAt, body}] (newest first).

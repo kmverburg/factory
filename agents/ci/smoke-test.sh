@@ -83,7 +83,7 @@ check "review escalate: only the manual task with steps" 1 "$(count '- KV-8' "$t
 check "review escalate: Linear moved to Blocked" 1 "$(count 'linear_set_state KV-1 Blocked' "$tmp/re.linear")"
 check "review escalate: comment starts with the decision" '**What you need to decide:** Approve this PR anyway? too risky' "$(head -n1 "$tmp/w-re/comment.md")"
 check "review escalate: category marker in the PR comment" 1 "$(count '<!-- factory-escalation: other -->' "$tmp/w-re/comment.md")"
-check "review escalate: Linear comment starts with the decision" 1 "$(count 'linear_comment KV-1 **What you need to decide:**' "$tmp/re.linear")"
+check "review escalate: Linear comment starts with the decision" 1 "$(count 'linear_comment KV-1 🙋 **What you need to decide:**' "$tmp/re.linear")"
 check "review no verdict: escalates" 1 "$(review rh 'not json' >/dev/null; count 'add-label needs-human' "$tmp/rh.gh")"
 
 # ---- build/publish.sh -----------------------------------------------------------------------------------------

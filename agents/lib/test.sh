@@ -34,5 +34,16 @@ check "other labels are never removed" 0 "$(run "[$AUTO,$BUG]" "Human involved" 
 check "unknown label changes nothing" "" "$(run "[]" "Nope")"
 check "group label id lookup" "o-agent" "$(linear_group_label_id "$TEAM" Origin Agent)"
 check "group label id lookup needs the right group" "" "$(linear_group_label_id "$TEAM" Delivery Agent)"
+
+# Comment markers: an unmarked comment gets one, a marked one is untouched, and both comment helpers send the marked text.
+check "marker added to an unmarked comment" "🏭 hello" "$(linear_mark "hello")"
+check "marked comment unchanged" "🙋 **What you need to decide:** x" "$(linear_mark "🙋 **What you need to decide:** x")"
+check "every marker is kept as is" "⏳ x" "$(linear_mark "⏳ x")"
+SENT=""
+linear_gql() { case "$1" in *"issue(id"*) echo '{"data":{"issue":{"id":"uuid"}}}' ;; *commentCreate*) SENT=$(jq -r .b <<<"$2") ;; esac; }
+linear_comment KOE-1 "plain" >/dev/null
+check "linear_comment marks a plain comment" "🏭 plain" "$SENT"
+linear_comment_on_id uuid "plain too" >/dev/null
+check "linear_comment_on_id marks a plain comment" "🏭 plain too" "$SENT"
 rm -f "$CALLS"
 exit $fail
