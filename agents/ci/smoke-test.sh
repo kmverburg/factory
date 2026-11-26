@@ -13,7 +13,7 @@ count() { grep -cF -- "$1" "$2" || true; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 # A copy of agents/ with the real publish scripts but stubbed Linear helpers (they only record their calls).
 fd="$tmp/factory"; mkdir -p "$fd/agents/lib" "$fd/agents/review" "$fd/agents/build" "$tmp/bin"
-cp "$root"/agents/review/{publish,workflows}.sh "$fd/agents/review/"
+cp "$root"/agents/review/{publish,workflows,learn}.sh "$root"/agents/review/categories.json "$root"/agents/review/learn.jq "$fd/agents/review/"
 cp "$root/agents/build/publish.sh" "$fd/agents/build/"
 cat > "$fd/agents/lib/linear.sh" <<'STUB'
 for f in linear_comment linear_set_state linear_set_group_label linear_upload_image; do
@@ -81,6 +81,9 @@ check "review escalate: no auto-merge" 0 "$(count 'pr merge' "$tmp/re.gh")"
 check "review escalate: manual ticket blocks the original" 1 "$(count 'linear_create_manual_tickets KV-1 blocking' "$tmp/re.linear")"
 check "review escalate: only the manual task with steps" 1 "$(count '- KV-8' "$tmp/w-re/comment.md")"
 check "review escalate: Linear moved to Blocked" 1 "$(count 'linear_set_state KV-1 Blocked' "$tmp/re.linear")"
+check "review escalate: comment starts with the decision" '**What you need to decide:** Approve this PR anyway? too risky' "$(head -n1 "$tmp/w-re/comment.md")"
+check "review escalate: category marker in the PR comment" 1 "$(count '<!-- factory-escalation: other -->' "$tmp/w-re/comment.md")"
+check "review escalate: Linear comment starts with the decision" 1 "$(count 'linear_comment KV-1 **What you need to decide:**' "$tmp/re.linear")"
 check "review no verdict: escalates" 1 "$(review rh 'not json' >/dev/null; count 'add-label needs-human' "$tmp/rh.gh")"
 
 # ---- build/publish.sh -----------------------------------------------------------------------------------------

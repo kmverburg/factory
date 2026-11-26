@@ -62,10 +62,24 @@ it to manual_tasks: a "title", a "why" and the exact "steps" Koen must follow. T
 separate `factory:manual` ticket assigned to Koen; when you escalate, it blocks this ticket. Never put
 manual work in follow_ups or leave it only in prose.
 
+Escalations must take Koen seconds to read. When you escalate:
+- "decision_needed": one or two sentences, phrased as a yes/no question where possible (for example "Allow adding
+  Vitest as a dev-only dependency?"). It is shown first, so it must make sense without the rest.
+- "summary": at most two short sentences (what changed). "reasons": at most three short items (why a human is needed).
+  "checks": one short line. No long lists of files.
+- "categories": every reason category that applies, from this fixed list (the factory counts them to learn what Koen
+  always approves): dependency-dev (dev-only dependency), dependency-runtime, schema, data-deletion, infra-config
+  (CI, deployment, infrastructure), large-change, off-ticket (different from or vague ticket), unverifiable,
+  failed-check (CI failure outside the code), factory-rule (breaks a Factory review rule), security (authentication,
+  authorisation, payments, secrets, encryption, personal data), workflow-change (anything under .github/), other.
+  Use no other words. Leave "decision_needed" and "categories" empty when you don't escalate.
+
 Write your verdict as JSON to .factory-review/verdict.json, exactly in this shape:
 {"decision": "approve" | "fix" | "escalate",
  "risk": "low" | "medium" | "high",
  "summary": "two or three sentences on what the PR does and how well",
+ "decision_needed": "yes/no question for Koen; only when escalating",
+ "categories": ["category from the list above; only when escalating"],
  "reasons": ["why you chose fix or escalate; empty when approving"],
  "fix_requests": ["specific instructions for the builder; empty unless decision is fix"],
  "follow_ups": [{"title": "short imperative title", "goal": "what and why", "acceptance": ["checkable item"], "out_of_scope": ["item"], "agent_notes": "hints, optional"}],
