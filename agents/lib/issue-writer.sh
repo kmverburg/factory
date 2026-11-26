@@ -12,6 +12,7 @@
 #     "acceptance": ["…"], "out_of_scope": ["…"], "agent_notes": "…", "related": ["KV-1"],
 #     "footer": "text kept at the bottom (for example Koen's original words)",
 #     "origin": "Agent" (default) | "Human",
+#     "priority": 2,                    optional Linear priority (1 urgent, 2 high, 3 medium, 4 low)
 #     "manual": true,                   label factory:manual, assigned to Koen (FACTORY_OWNER_EMAIL)
 #     "delivery": "Human involved" | "Autonomous",   only when known
 #     "state": "triage" (Todo if the team has no triage) | "todo" | "blocked" | "needs human",

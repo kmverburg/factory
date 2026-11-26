@@ -23,6 +23,7 @@ app repo: factory.yml → build.yml (builder agent) → opens PR, issue → "Age
 | `.github/workflows/review.yml` | Reusable reviewer agent workflow |
 | `.github/workflows/sync-caller.yml` | Sends caller workflow changes to the app repos |
 | `.github/workflows/health.yml` | Daily self-check that files "Factory health: …" tickets, see [docs/health-check.md](docs/health-check.md) |
+| `.github/workflows/secret-scan.yml` | Daily scan of Actions logs, Workers Builds logs and new commits for leaked secrets, see [docs/secret-scan.md](docs/secret-scan.md) |
 | `.github/workflows/stuck.yml` | Hourly check that retries tickets and PRs whose run died, see [docs/health-check.md](docs/health-check.md#stuck-tickets-and-prs-hourly) |
 | `.github/workflows/weekly-report.yml` | Mondays: weekly factory report (autonomy, lead time, escalations) as a Linear project update, see [docs/weekly-report.md](docs/weekly-report.md) |
 | `agents/lib/issue-writer.sh`, `agents/issue-writer/` | The issue writer: the one way tickets are created, and rough notes from Koen become proper tickets, see [docs/issue-writer.md](docs/issue-writer.md) |
