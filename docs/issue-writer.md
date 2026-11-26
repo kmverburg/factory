@@ -36,6 +36,7 @@ footer                    (for example the signature, or Koen's original words)
 - Manual tickets from the builder and the reviewer (below).
 - Rough notes from Koen (below).
 
+- The dependency check (`agents/deps/deps.sh`): update tickets, Origin › Agent, `factory:dependencies`, priority for security fixes; Agent Ready is set by the check itself after creation.
 - The deploy watch (`agents/watch/watch.sh`): "Revert: …" tickets, Needs Human, Delivery › Human involved, related to the original, deduplicated by commit.
 
 **Every part of the factory that creates a ticket must use the issue writer.** So does anything new.

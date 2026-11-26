@@ -60,6 +60,10 @@ check "agent ticket: Todo by default" s-todo "$(created_input | jq -r .stateId)"
 check "agent ticket: project and team" "p1 t1" "$(created_input | jq -r '"\(.projectId) \(.teamId)"')"
 check "description is the formatted text" "$desc" "$(created_input | jq -r .description)"
 
+check "no priority unless asked" null "$(created_input | jq -c '.priority // null')"
+run "$(jq -c '. + {priority: 2}' <<<"$BASE")"
+check "priority is passed on" 2 "$(created_input | jq -r .priority)"
+
 # Labels and assignee
 run "$(jq -c '. + {origin: "Human", delivery: "Human involved", manual: true}' <<<"$BASE")"
 check "manual ticket: Origin, Delivery and factory:manual" '["o-human","d-human","l-manual"]' "$(created_input | jq -c .labelIds)"

@@ -19,6 +19,7 @@
 #     "blocked_by": ["KV-1"],           those tickets block the new one (state blocked needs at least one)
 #     "blocks": ["KV-2"],               the new ticket blocks those, which move to Blocked unless "block_state": false
 #     "labels": ["source:logs"],        extra labels, created when missing
+#     "priority": 2,                    Linear priority (1 urgent, 2 high, 3 medium, 4 low); default none
 #     "update": "KV-7",                 rewrite this existing ticket (title, description, project, labels, assignee) instead of creating one;
 #                                       its state only changes when "state" is given, its other labels are kept, no deduplication
 #     "dedup": true, "dedup_marker": "text that is in the description of a ticket about the same thing",
