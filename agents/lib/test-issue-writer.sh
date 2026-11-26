@@ -118,7 +118,25 @@ check "related manual ticket: related relation" related "$(grep '^relation' "$CA
 OPEN='[{"id":"u1","identifier":"KV-3","url":"u","title":"Add the secret","description":"x"}]'
 : > "$CALLS"; OUT=$(linear_create_manual_tickets KV-8 "$CALLS.tasks" blocking "F" 2>/dev/null)
 check "manual: no duplicate ticket for the same task" 0 "$(grep -c '^issueCreate' "$CALLS")"
-rm -f "$CALLS.tasks"
+# Refusals: repo file changes, an existing Linear status; a valid manual ticket with a "checked" note is created
+printf '%s' '[{"title":"Pass the secret to the job","why":"w","steps":["Edit .github/workflows/update.yml and add LINEAR_API_KEY to env"]}]' > "$CALLS.tasks"
+OPEN='[]'; : > "$CALLS"; REF=$(mktemp); OUT=$(MANUAL_REFUSED_FILE=$REF linear_create_manual_tickets KV-8 "$CALLS.tasks" blocking "F" 2>/dev/null)
+check "manual with repo file changes: refused" 0 "$(grep -c '^issueCreate' "$CALLS")"
+has "manual with repo file changes: reason recorded" "not manual work" "$(cat "$REF")"
+printf '%s' '[{"title":"Create the Conflicts status","why":"w","steps":["Open Linear team settings","Add a status named \"Conflicts\""]}]' > "$CALLS.tasks"
+CTX_SAVE=$CTX; CTX=$(jq -c '.team.states.nodes += [{"id":"s-c","name":"Conflicts","type":"started"}]' <<<"$CTX")
+data_issue='{"data":{"issue":{"id":"uuid-KV-8","identifier":"KV-8","project":{"id":"p1"},"team":'"$(jq -c .team <<<"$CTX")"'}}}'
+: > "$CALLS"; : > "$REF"; OUT=$(MANUAL_REFUSED_FILE=$REF linear_create_manual_tickets KV-8 "$CALLS.tasks" blocking "F" 2>/dev/null)
+check "manual for an existing Linear status: refused" 0 "$(grep -c '^issueCreate' "$CALLS")"
+has "manual for an existing Linear status: says what was checked" "already exists" "$(cat "$REF")"
+CTX=$CTX_SAVE; data_issue='{"data":{"issue":{"id":"uuid-KV-8","identifier":"KV-8","project":{"id":"p1"},"team":'"$(jq -c .team <<<"$CTX")"'}}}'
+: > "$CALLS"; OUT=$(MANUAL_REFUSED_FILE=$REF linear_create_manual_tickets KV-8 "$CALLS.tasks" blocking "F" 2>/dev/null)
+check "manual for a missing Linear status: created" 1 "$(grep -c '^issueCreate' "$CALLS")"
+printf '%s' '[{"title":"Add the secret","why":"w","checked":"Infisical has no KEY in prod.","steps":["Open Infisical","Add KEY"]}]' > "$CALLS.tasks"
+: > "$CALLS"; OUT=$(linear_create_manual_tickets KV-8 "$CALLS.tasks" blocking "F" 2>/dev/null)
+check "valid manual ticket: created" 1 "$(grep -c '^issueCreate' "$CALLS")"
+has "valid manual ticket: shows what was checked" "Checked before filing: Infisical has no KEY in prod." "$(created_input | jq -r .description)"
+rm -f "$CALLS.tasks" "$REF"
 
 # Follow-ups use the writer too
 printf '%s' '[{"title":"Add tests","goal":"There are none.","acceptance":["A test runs"]}]' > "$CALLS.fu"

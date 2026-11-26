@@ -26,7 +26,10 @@
 #     "dedup_comment": "comment for an existing ticket (default: the goal)"
 #   }
 #   CTX = {id, team: {id, states: {nodes}, labels: {nodes}}} (what linear_project_context prints); looked up from "project" when absent.
-# Never moves a ticket to Agent Ready. Prints "created IDENT url" or "duplicate IDENT url", or nothing (with a warning on stderr).
+# Never moves a ticket to Agent Ready. Prints "created IDENT url", "duplicate IDENT url" or "refused REASON", or nothing (with a warning on stderr).
+# A manual ticket is refused when its steps change files in a repo (that is builder work, not manual work) or ask for a Linear status or
+# label that already exists in the team (checked against the CTX). Manual tickets are only for things outside the repos: accounts,
+# settings in GitHub, Cloudflare, Linear or Infisical, and secret values. "checked": "what was checked and found" is shown in the ticket.
 FACTORY_OWNER_EMAIL=${FACTORY_OWNER_EMAIL:-linear@kmverburg.nl}
 MANUAL_LABEL=${MANUAL_LABEL:-factory:manual}
 
@@ -50,6 +53,22 @@ issue_format() {
 # $1 = identifier. Prints the issue uuid, or nothing.
 issue_uuid() { linear_issue "$1" 2>/dev/null | jq -r '.data.issue.id // empty'; }
 
+# $1 = spec, $2 = ctx. For a manual spec, prints the reason it must not be filed, or nothing.
+issue_manual_refusal() {
+  jq -r --argjson ctx "$2" '
+    ([.title // ""] + (.steps // []) | map(tostring)) as $t
+    | ($t | join("\n")) as $text
+    | ($t | map(select(test("\\b(edit|change|modify|update|add|create|commit|push|patch|write|delete|remove|rename|merge)\\b"; "i")
+                       and test("(\\.github/|\\b[\\w./-]+\\.(ya?ml|jsonc?|sh|ts|tsx|js|jq|md|toml)\\b|workflow file|source code|pull request|\\bgit (commit|push)\\b)"; "i")))) as $repo
+    | ($text | [match("\\b(?:create|add|make)\\b[^\"`\u0027\\n]{0,40}\\b(status|label|workflow state)\\b[^\"`\u0027\\n]{0,40}[\"`\u0027]([^\"`\u0027\\n]+)[\"`\u0027]"; "gi") | {kind: .captures[0].string, name: .captures[1].string}]) as $asks
+    | ($asks | map(. as $a | select(
+        (if ($a.kind | ascii_downcase) == "label" then [$ctx.team.labels.nodes[]? | .name | ascii_downcase] else [$ctx.team.states.nodes[]? | .name | ascii_downcase] end
+         | index($a.name | ascii_downcase)) != null))) as $exists
+    | if ($repo | length) > 0 then "the steps change files in a repo (" + ($repo[0] | .[0:100]) + "). That is not manual work: send it to the builder as a fix round, or file a normal agent ticket."
+      elif ($exists | length) > 0 then "I checked the Linear team: the " + $exists[0].kind + " \"" + $exists[0].name + "\" already exists. Nothing to do."
+      else empty end' <<<"$1"
+}
+
 # $1 = blocker identifier or uuid, $2 = blocked one, $3 = type (blocks | related). Warns instead of failing.
 issue_relate() {
   local a b
@@ -63,7 +82,7 @@ issue_relate() {
 # $1 = spec, $2 = ctx (optional)
 issue_write() {
   local spec=$1 ctx=$2 project team_id project_id labels states state_want state_id title desc
-  local label_ids=() lid name origin delivery assignee open dup dup_id dup_ident dup_url comment input created ident url other update uuid existing
+  local label_ids=() lid name origin delivery assignee open dup dup_id dup_ident dup_url comment input created ident url other update uuid existing reason
   if [ -z "$ctx" ]; then
     project=$(jq -r '.project // empty' <<<"$spec")
     ctx=$(linear_project_context "$project" 2>/dev/null) || ctx=""
@@ -74,6 +93,15 @@ issue_write() {
   labels=$(jq -c '.team.labels.nodes // []' <<<"$ctx")
   states=$(jq -c '.team.states.nodes // []' <<<"$ctx")
   title=$(jq -r '.title' <<<"$spec")
+
+  if [ "$(jq -r '.manual // false' <<<"$spec")" = true ]; then
+    reason=$(issue_manual_refusal "$spec" "$ctx") || reason=""
+    if [ -n "$reason" ]; then
+      echo "::warning::Not filing manual ticket '$title': $reason" >&2
+      echo "refused $reason"
+      return 0
+    fi
+  fi
 
   update=$(jq -r '.update // empty' <<<"$spec")
 
@@ -198,7 +226,7 @@ linear_create_manual_tickets() {
   [ "$3" = blocking ] && blocks=true
   while IFS= read -r item; do
     spec=$(jq -c --arg f "$4" --arg src "$1" --argjson b "$blocks" '
-      {title, goal: ((.why // "") + "\n\nThis is manual work the factory could not do or confirm itself. It is needed for " + $src + "."),
+      {title, goal: ((.why // "") + (if (.checked // "") != "" then "\n\nChecked before filing: " + .checked else "" end) + "\n\nThis is manual work the factory could not do or confirm itself. It is needed for " + $src + "."),
        steps, acceptance: (.acceptance // ["The steps above are done."]),
        agent_notes: ("The factory checked that it cannot do this itself. When this ticket is Done" + (if $b then ", " + $src + " is released by the relay." else "." end)),
        footer: $f, origin: "Agent", manual: true, delivery: "Human involved", state: "todo", dedup: true,
@@ -207,6 +235,7 @@ linear_create_manual_tickets() {
     case "$out" in
       "created "*) read -r _ ident url <<<"$out"; echo "- [$ident]($url): $(jq -r .title <<<"$item")" ;;
       "duplicate "*) echo "::notice::Skipped duplicate manual ticket: $(jq -r .title <<<"$item")" >&2 ;;
+      "refused "*) [ -z "$MANUAL_REFUSED_FILE" ] || echo "- $(jq -r .title <<<"$item"): ${out#refused }" >> "$MANUAL_REFUSED_FILE" ;;
       *) echo "::warning::Could not create manual ticket: $(jq -r .title <<<"$item")" >&2 ;;
     esac
   done < <(jq -c '.[]' "$2")

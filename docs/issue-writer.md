@@ -46,6 +46,7 @@ footer                    (for example the signature, or Koen's original words)
 The builder and the reviewer may only call something manual after checking they can't do or confirm it themselves (read a public repo, call the GitHub or Linear API, run the command). The prompts say so.
 
 - **Builder:** if the ticket can't be done without manual work, it makes no code changes and writes `.factory/MANUAL_TASKS.json` (`[{title, why, steps}]`). `agents/build/publish.sh` creates one ticket per task: `factory:manual`, assigned to Koen, exact steps, **blocking** the original, which moves to **Blocked**. When Koen sets the manual ticket to Done, the relay releases the original (see README, "Blocked tickets and Auto-start"). If the tickets can't be created, the original goes to Needs Human with the tasks as questions.
+- **Refused:** `issue_write` does not file a manual ticket whose steps change files in a repo (code, config, workflows, docs) or ask for a Linear status or label that already exists in the team. It prints `refused REASON`; the builder then falls back to a question on the ticket with that reason. Manual tickets are only for things outside the repos. Tasks may carry `checked` (what the agent checked through the API and found), which is shown in the ticket.
 - **Reviewer:** `manual_tasks` in the verdict, same shape. When it escalates, the tickets block the original (Blocked instead of Needs Human); otherwise they are only related, so an approved PR is not held up.
 
 ## Rough notes from Koen

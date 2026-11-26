@@ -26,7 +26,12 @@ How to work:
    throwaway script under .factory/ that clicks through the changed flow and its edge cases, and save
    screenshots under .factory/ that you then Read to look at. Fix what you find.
 5. Do NOT commit, push, create branches or open pull requests. The workflow does that after you finish.
-6. Only edit files under .github/ when the ticket explicitly asks for a workflow change, never otherwise (a human always approves those PRs). Never read or change .env files or secrets, and never add credentials to code.
+6. Workflow files under .github/: edit them only when the ticket asks for it, or when the ticket can't work without a small
+   change it didn't mention (for example passing an existing secret to a job, or an existing input to a step). Make that
+   small change in the same PR and list it under its own heading "## Workflow changes" in .factory/PR_BODY.md (file, what
+   and why). Bigger changes the ticket didn't ask for (a new workflow, a new trigger, new permissions or a new secret)
+   are never made: write them as a question to .factory/QUESTIONS.md, never as a manual task. A human always approves
+   workflow PRs. Never read or change .env files or secrets, and never add credentials to code.
 7. Everything under .factory/ is thrown away. Never put real code there.
 
 When you are done, write a description of your work to .factory/PR_BODY.md with these sections:
@@ -34,11 +39,16 @@ When you are done, write a description of your work to .factory/PR_BODY.md with 
 results), ## Risks (anything a reviewer should look at closely, or "None known").
 
 Manual work: never call something manual before you checked that you can't do or confirm it yourself (for
-example read a public repo, call the GitHub or Linear API, run the command). If the ticket can't be
-done without something only Koen can do (an account, a secret, a setting in a dashboard), make NO code changes
-and write .factory/MANUAL_TASKS.json instead: a JSON list of {"title": "...", "why": "...", "steps": ["exact
-step", ...]}. The factory files each as a separate `factory:manual` ticket for Koen that blocks this one.
-Use it only for steps that really are manual; questions about the ticket go in QUESTIONS.md.
+example read a public repo, call the GitHub or Linear API, run the command). Changing a file in a repo (code,
+config, workflows, docs) is never manual work: you do it. Manual work is only what lies outside the repos: an
+account, a setting in GitHub, Cloudflare, Linear or Infisical, or a secret value. Before you write a manual task
+about something in Linear, GitHub or Cloudflare, check through the API whether it already exists (a status, label,
+setting or secret) and put what you checked and found in "checked". If the ticket can't be done without something
+only Koen can do, make NO code changes and write .factory/MANUAL_TASKS.json instead: a JSON list of
+{"title": "...", "why": "...", "checked": "what you checked and found", "steps": ["exact step", ...]}. The factory
+files each as a separate `factory:manual` ticket for Koen that blocks this one, and refuses one whose steps change
+repo files or ask for something that already exists. Use it only for steps that really are manual; questions about
+the ticket go in QUESTIONS.md.
 
 If the ticket or feedback is ambiguous, contradicts the code, or can't be done safely, make NO code changes.
 Instead write your specific questions to .factory/QUESTIONS.md and stop. Asking is better than guessing.
