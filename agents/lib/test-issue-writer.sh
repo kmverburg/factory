@@ -94,7 +94,7 @@ check "dedup by title: comment on the existing one" 1 "$(grep -c '^comment' "$CA
 check "dedup output" "duplicate KV-3 https://linear.app/KV-3" "$OUT"
 OPEN='[{"id":"u1","identifier":"KV-3","url":"u","title":"Other","description":"Signature: `logsig-1`"}]'
 run "$(jq -c '. + {dedup_marker: "Signature: `logsig-1`", dedup_comment: "Again"}' <<<"$BASE")"
-check "dedup by marker: comment text" Again "$(grep '^comment' "$CALLS" | cut -f2- | jq -r .b)"
+check "dedup by marker: comment text" "🏭 Again" "$(grep '^comment' "$CALLS" | cut -f2- | jq -r .b)"
 run "$(jq -c '. + {dedup_marker: "Signature: `logsig-2`"}' <<<"$BASE")"
 check "dedup: another marker creates the ticket" 1 "$(grep -c '^issueCreate' "$CALLS")"
 OPEN=NONE; run "$(jq -c '. + {dedup: true}' <<<"$BASE")"

@@ -10,6 +10,9 @@ scripts=$(ls agents/*.sh agents/*/*.sh)
 step "bash -n" bash -c 'for f in '"$(echo $scripts)"'; do bash -n "$f" || exit 1; done'
 # shellcheck disable=SC2086
 step "shellcheck" shellcheck -x -S warning $scripts
+# Linear comments are created only by the helpers in lib/linear.sh, which add the factory marker.
+no_direct_comments() { ! grep -n commentCreate agents/*.sh agents/*/*.sh | grep -v '^agents/ci/' | grep -v '/test[^/]*\.sh:' | grep -v '^agents/lib/linear\.sh:' | grep .; }
+step "no direct commentCreate" no_direct_comments
 step "jq filters compile" bash agents/ci/check-jq.sh
 step "smoke tests (publish scripts)" bash agents/ci/smoke-test.sh
 tests=(agents/scout/test.sh agents/deps/test.sh agents/watch/test.sh agents/health/test.sh agents/health/test-stuck.sh agents/secrets/test.sh agents/lib/test.sh agents/lib/test-issue-writer.sh

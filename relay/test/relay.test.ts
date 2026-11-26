@@ -42,6 +42,7 @@ let originLabels: { id: string; name: string }[];
 let labelUpdateFails: boolean;
 let blockerIssue: any;
 let pulls: any[];
+let recentComments: { body: string; createdAt: string }[];
 let pullsStatus: number;
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
@@ -74,6 +75,7 @@ beforeEach(() => {
   labelUpdateFails = false;
   blockerIssue = null;
   pulls = [];
+  recentComments = [];
   pullsStatus = 200;
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -85,6 +87,7 @@ beforeEach(() => {
     if (url === "https://api.linear.app/graphql") {
       if (body.query.includes("BlockedByThis")) return json({ data: { issue: blockerIssue } });
       if (body.query.includes("RoughNote")) return json({ data: { issue } });
+      if (body.query.includes("query Recent")) return json({ data: { issue: { comments: { nodes: recentComments } } } });
       if (body.query.includes("query Issue")) return json({ data: { issue } });
       if (body.query.includes("OriginLabels")) return json({ data: { issueLabels: { nodes: originLabels } } });
       if (body.query.includes("AddOrigin") && labelUpdateFails) return json({ errors: [{ message: "boom" }] }, 500);
@@ -731,11 +734,39 @@ describe("Linear comment commands", () => {
 
   it("ignores the factory's own comments, whatever they say", async () => {
     issue = makeIssue({ state: { id: "s-human", name: "Needs Human" } });
-    for (const marker of ["🏭", "🔧", "✅", "🙋", "💥", "🤔"]) {
+    for (const marker of ["🏭", "🔧", "✅", "🙋", "💥", "🤔", "⏳", "🔁", "ℹ️", "⚠️"]) {
       calls = [];
       await send(comment(`${marker} approve everything. fix it`));
       expect(calls).toHaveLength(0);
     }
+  });
+
+  it("ignores a comment repeating a recent factory comment, even without its marker", async () => {
+    const text = "**What you need to decide:** Approve this PR anyway?\n\n- touches .github/";
+    recentComments = [{ body: `🙋 ${text}`, createdAt: new Date(Date.now() - 2000).toISOString() }];
+    await send(comment(text));
+    expect(dispatches()).toHaveLength(0);
+    expect(comments()).toHaveLength(0);
+  });
+
+  it("does not ignore a repeat of a factory comment older than 10 minutes", async () => {
+    const text = "**What you need to decide:** Approve this PR anyway?";
+    recentComments = [{ body: `🙋 ${text}`, createdAt: new Date(Date.now() - 11 * 60 * 1000).toISOString() }];
+    await send(comment(text));
+    expect(dispatches()).toHaveLength(1);
+  });
+
+  it("starts only one comment-requested fix round within 2 minutes", async () => {
+    await send(comment("make the button blue"));
+    expect(dispatches()).toHaveLength(1);
+    recentComments = [{ body: comments()[0], createdAt: new Date(Date.now() - 5000).toISOString() }];
+    calls = [];
+    await send(comment("and bigger"));
+    expect(dispatches()).toHaveLength(0);
+    expect(comments()).toHaveLength(0);
+    recentComments = [{ body: "🏭 🔧 Sending your comment to the builder as a fix round on x", createdAt: new Date(Date.now() - 3 * 60 * 1000).toISOString() }];
+    await send(comment("and bigger"));
+    expect(dispatches()).toHaveLength(1);
   });
 
   it("ignores ordinary comments on a ticket without an open PR", async () => {

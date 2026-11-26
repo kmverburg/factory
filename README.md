@@ -139,7 +139,7 @@ One-time setup for this repo, the same as step 5 for an app:
 
 ### Linear comment commands
 
-Koen can also approve a PR, ask for changes or answer the builder's questions by commenting on the Linear ticket: see [Linear comment commands](docs/linear-commands.md).
+Koen can also approve a PR, ask for changes or answer the builder's questions by commenting on the Linear ticket: see [Linear comment commands](docs/linear-commands.md). Every comment the factory writes starts with a marker (🏭 🔧 ✅ 🙋 💥 🤔 ⏳ 🔁 ℹ️ ⚠️; a helper adds 🏭 when one is missing), so the relay never mistakes it for Koen's, and it also ignores repeats of recent factory comments and starts at most one comment-requested fix round per ticket in 2 minutes.
 
 ### Blocked tickets and Auto-start
 

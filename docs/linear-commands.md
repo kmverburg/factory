@@ -22,7 +22,7 @@ Every approval and change request gets a short confirmation comment from the rel
 
 ## Rules
 
-- **Factory comments are never commands.** Every comment the factory writes starts with one of 🏭 🔧 ✅ 🙋 💥 🤔, and the relay ignores comments that start with one. Keep this in mind when adding a new kind of comment: start it with a marker.
+- **Factory comments are never commands.** Every comment the factory writes starts with one of 🏭 🔧 ✅ 🙋 💥 🤔 ⏳ 🔁 ℹ️ ⚠️, and the relay ignores comments that start with one. `linear_comment` and `linear_comment_on_id` (`agents/lib/linear.sh`) put 🏭 in front when a comment has no marker, the relay does the same for its own replies, and the Agent scripts check fails when a script calls `commentCreate` itself. As a second guard the relay also ignores a comment that repeats a factory comment from the last 10 minutes (marker or not) and starts at most one comment-requested fix round per ticket in 2 minutes. Keep this in mind when adding a new kind of comment: start it with a marker.
 - **Only the factory's own PRs.** The PR must have the `agent-built` label, and is found by its branch name starting with the ticket identifier (`kv-45-…`, which is how the builder names it). Approving or changing any other PR is refused with an explanation.
 - Anyone who can comment on a ticket in a mapped project can give commands, so keep the workspace to people who may merge.
 
