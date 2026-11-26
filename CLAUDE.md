@@ -49,7 +49,7 @@ Once a day (the schedule workflow is added by Koen) `agents/scout/scout.sh` read
 - Keep prompts short and concrete; every rule in a prompt should be checkable.
 
 ## Off-limits
-- `.github/`: change workflow files only when the ticket explicitly asks for it, never otherwise. The reviewer always escalates such a PR and it never auto-merges, so Koen approves every workflow change.
+- `.github/`: change workflow files only when the ticket asks for it. If a ticket can't work without a small workflow change it didn't mention (for example passing an existing secret to a job), the builder makes it in the same PR and lists it under "Workflow changes" in the PR description; bigger changes (new workflows, new triggers, new permissions or secrets) are asked about on the ticket first, never filed as manual work. The reviewer always escalates such a PR and it never auto-merges, so Koen approves every workflow change.
 - Weakening the relay's webhook signature or timestamp checks.
 - `relay/wrangler.jsonc` `name`, and anything that would expose secrets.
 

@@ -11,6 +11,7 @@ gh label create needs-human --color D93F0B --description "Factory wants a human 
 if [ -s .factory/MANUAL_TASKS.json ] && [ ! -s .factory/QUESTIONS.md ] \
   && jq -e 'type == "array" and any(.[]; (.title // "") != "" and ((.steps // []) | length) > 0)' .factory/MANUAL_TASKS.json >/dev/null 2>&1; then
   jq '[.[] | select((.title // "") != "" and ((.steps // []) | length) > 0)] | .[:3]' .factory/MANUAL_TASKS.json > "$RUNNER_TEMP/manual_tasks.json"
+  export MANUAL_REFUSED_FILE="$RUNNER_TEMP/manual_refused.md"; : > "$MANUAL_REFUSED_FILE"
   created=$(linear_create_manual_tickets "$ISSUE_IDENTIFIER" "$RUNNER_TEMP/manual_tasks.json" blocking "Created by the builder agent for $ISSUE_IDENTIFIER. Run: $run_url") || true
   if [ -n "$created" ]; then
     if [ "$EVENT_TYPE" = "factory-fix" ]; then gh pr edit "$PR_NUMBER" --add-label needs-human; fi
@@ -19,7 +20,11 @@ if [ -s .factory/MANUAL_TASKS.json ] && [ ! -s .factory/QUESTIONS.md ] \
     exit 0
   fi
   echo "::warning::Could not create the manual tickets; falling back to Needs Human"
-  echo "The builder needs manual work but the tickets could not be created: $(jq -c . .factory/MANUAL_TASKS.json)" > .factory/QUESTIONS.md
+  if [ -s "$MANUAL_REFUSED_FILE" ]; then
+    printf 'The builder asked for manual work, but the issue writer refused it (repo changes are the builder'"'"'s own work, and things that already exist need nothing):\n\n%s\n' "$(cat "$MANUAL_REFUSED_FILE")" > .factory/QUESTIONS.md
+  else
+    echo "The builder needs manual work but the tickets could not be created: $(jq -c . .factory/MANUAL_TASKS.json)" > .factory/QUESTIONS.md
+  fi
 fi
 
 if [ -s .factory/QUESTIONS.md ]; then

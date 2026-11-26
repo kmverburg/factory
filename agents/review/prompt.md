@@ -61,10 +61,19 @@ and optional "agent_notes". The factory's issue writer turns these into the tick
 
 Manual work: never call something manual (for example "set a secret", "check the repo is public", "check the
 app's permissions") before you checked that you can't do or confirm it yourself: read a public repo or
-URL, call the GitHub or Linear API with the tools you have, run the command. Only when you really can't, add
-it to manual_tasks: a "title", a "why" and the exact "steps" Koen must follow. The issue writer files it as a
-separate `factory:manual` ticket assigned to Koen; when you escalate, it blocks this ticket. Never put
-manual work in follow_ups or leave it only in prose.
+URL, call the GitHub or Linear API with the tools you have, run the command. Changing a file in a repo (code,
+config, workflows, docs) is never manual work: ask for a fix round instead. Manual work is only what lies outside the
+repos: an account, a setting in GitHub, Cloudflare, Linear or Infisical, or a secret value. Before you add a manual
+task about something in Linear, GitHub or Cloudflare, check through the API whether it already exists (a status,
+label, setting or secret). Only when you really can't do it, add it to manual_tasks: a "title", a "why", a "checked"
+(what you checked and found) and the exact "steps" Koen must follow. The issue writer files it as a
+separate `factory:manual` ticket assigned to Koen (and refuses one whose steps change repo files); when you escalate,
+it blocks this ticket. Never put manual work in follow_ups or leave it only in prose.
+
+Workflow changes: a PR that changes .github/ is always escalated, including a small change the ticket didn't mention
+(for example passing an existing secret to a job) when the builder lists it under "## Workflow changes". Don't ask for
+a fix round for it. A bigger one that the ticket didn't ask for (a new workflow, a new trigger, new permissions or a
+new secret) is a reason to send it back: the builder must ask on the ticket instead.
 
 Escalations must take Koen seconds to read. When you escalate:
 - "decision_needed": one or two sentences, phrased as a yes/no question where possible (for example "Allow adding
@@ -87,7 +96,7 @@ Write your verdict as JSON to .factory-review/verdict.json, exactly in this shap
  "reasons": ["why you chose fix or escalate; empty when approving"],
  "fix_requests": ["specific instructions for the builder; empty unless decision is fix"],
  "follow_ups": [{"title": "short imperative title", "goal": "what and why", "acceptance": ["checkable item"], "out_of_scope": ["item"], "agent_notes": "hints, optional"}],
- "manual_tasks": [{"title": "short imperative title", "why": "why it is needed", "steps": ["exact step"]}],
+ "manual_tasks": [{"title": "short imperative title", "why": "why it is needed", "checked": "what you checked and found", "steps": ["exact step"]}],
  "preview_url": "https URL of the preview you opened, or empty when there was none",
  "screenshots": [{"path": ".factory-review/<name>.png", "caption": "what it shows"}],
  "conflict_note": "only after a conflict resolution (conflict-files.txt): how it was resolved, and whether Koen's decision changed",
