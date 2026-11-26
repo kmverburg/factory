@@ -188,7 +188,7 @@ const ANSWERS_HEADING = "## Answers from Koen";
 type Command = { kind: "approve" } | { kind: "decline" } | { kind: "change"; instructions: string };
 
 /** The one list of approving words and phrases (documented in docs/linear-commands.md). */
-const APPROVING_WORDS = ["approve", "approved", "yes", "yep", "yeah", "y", "ok", "okay", "lgtm", "go ahead", "ja"];
+const APPROVING_WORDS = ["approve", "approved", "allow", "allowed", "yes", "yep", "yeah", "y", "ok", "okay", "lgtm", "go ahead", "ja"];
 /** A reply of only one of these says no, which is not an instruction. */
 const DECLINING_WORDS = ["no", "nee"];
 

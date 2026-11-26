@@ -677,7 +677,7 @@ describe("Linear comment commands", () => {
   });
 
   it("treats a reply of only approving words as approval", async () => {
-    for (const text of ["yes", "Yes, approve", "approve", "OK", "ok.", "lgtm", "LGTM!", "go ahead", "Go ahead.", "ja", "Ja, approve!", " yes yes ", "okay"]) {
+    for (const text of ["yes", "Yes, approve", "approve", "OK", "ok.", "lgtm", "LGTM!", "go ahead", "Go ahead.", "Allow", "allow.", "ja", "Ja, approve!", " yes yes ", "okay"]) {
       calls = [];
       await send(comment(text));
       expect(dispatches(), text).toHaveLength(1);

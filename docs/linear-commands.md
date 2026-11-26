@@ -10,7 +10,7 @@ The relay's GitHub token needs *Pull requests: Read* (to find the ticket's PR) n
 
 ## Commands
 
-A comment made up **only** of approving words approves. Case, punctuation and surrounding spaces don't matter. The list lives in one place, `APPROVING_WORDS` in `relay/src/index.ts`: `approve`, `approved`, `yes`, `yep`, `yeah`, `y`, `ok`, `okay`, `lgtm`, `go ahead`, `ja` (so `yes, approve`, `Go ahead.` and `/approve` all count). Anything with more content is a change request, whatever word it starts with:
+A comment made up **only** of approving words approves. Case, punctuation and surrounding spaces don't matter. The list lives in one place, `APPROVING_WORDS` in `relay/src/index.ts`: `approve`, `approved`, `allow`, `allowed`, `yes`, `yep`, `yeah`, `y`, `ok`, `okay`, `lgtm`, `go ahead`, `ja` (so `yes, approve`, `Go ahead.` and `/approve` all count). Anything with more content is a change request, whatever word it starts with:
 
 - `yes but rename the button`
 - `approve after fixing the typo`
