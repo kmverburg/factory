@@ -60,6 +60,10 @@ check "agent ticket: Todo by default" s-todo "$(created_input | jq -r .stateId)"
 check "agent ticket: project and team" "p1 t1" "$(created_input | jq -r '"\(.projectId) \(.teamId)"')"
 check "description is the formatted text" "$desc" "$(created_input | jq -r .description)"
 
+check "no priority unless asked" null "$(created_input | jq -c '.priority // null')"
+run "$(jq -c '. + {priority: 2}' <<<"$BASE")"
+check "priority is passed on" 2 "$(created_input | jq -r .priority)"
+
 # Labels and assignee
 run "$(jq -c '. + {origin: "Human", delivery: "Human involved", manual: true}' <<<"$BASE")"
 check "manual ticket: Origin, Delivery and factory:manual" '["o-human","d-human","l-manual"]' "$(created_input | jq -c .labelIds)"
@@ -67,6 +71,10 @@ check "manual ticket: assigned to Koen" u-koen "$(created_input | jq -r .assigne
 run "$(jq -c '. + {labels: ["source:logs"]}' <<<"$BASE")"
 check "extra label that doesn't exist is created" 1 "$(grep -c '^labelCreate' "$CALLS")"
 check "extra label is on the ticket" '["o-agent","l-new"]' "$(created_input | jq -c .labelIds)"
+
+# Priority
+check "priority: none by default" null "$(run "$BASE"; created_input | jq -c '.priority // null')"
+run "$(jq -c '. + {priority: 2}' <<<"$BASE")"; check "priority: High when asked" 2 "$(created_input | jq -r .priority)"
 
 # State
 run "$(jq -c '. + {state: "triage"}' <<<"$BASE")"; check "triage: Triage state" s-triage "$(created_input | jq -r .stateId)"

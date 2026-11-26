@@ -12,8 +12,8 @@ step "bash -n" bash -c 'for f in '"$(echo $scripts)"'; do bash -n "$f" || exit 1
 step "shellcheck" shellcheck -x -S warning $scripts
 step "jq filters compile" bash agents/ci/check-jq.sh
 step "smoke tests (publish scripts)" bash agents/ci/smoke-test.sh
-tests=(agents/scout/test.sh agents/watch/test.sh agents/health/test.sh agents/health/test-stuck.sh agents/lib/test.sh agents/lib/test-issue-writer.sh
-  agents/issue-writer/test.sh agents/review/test.sh agents/review/test-recheck.sh agents/review/test-learn.sh agents/sync/test.sh agents/update/test.sh agents/approve/test.sh)
+tests=(agents/scout/test.sh agents/deps/test.sh agents/watch/test.sh agents/health/test.sh agents/health/test-stuck.sh agents/secrets/test.sh agents/lib/test.sh agents/lib/test-issue-writer.sh
+  agents/issue-writer/test.sh agents/review/test.sh agents/review/test-recheck.sh agents/review/test-learn.sh agents/sync/test.sh agents/update/test.sh agents/approve/test.sh agents/report/test.sh)
 for t in "${tests[@]}"; do step "$t" bash "$t"; done
 # A test script that isn't listed above would never run in CI.
 for t in agents/*/test*.sh; do

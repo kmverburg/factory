@@ -73,7 +73,7 @@ check "report: used last week, not this week" "used last week, not this week" "$
 check "report: health follows the number of findings" atRisk "$(jq -r .health <<<"$report")"
 
 # Dry run with signals: numbers, tickets (max 3 in total, errors first), report, no Linear, no raw email.
-run() { env -u LINEAR_API_KEY SCOUT_APPS="$here/fixtures/apps-signals.json" SCOUT_NO_LLM=1 SAMPLE_FILE="$here/fixtures/response.json" SAMPLE_EVENTS_FILE="$ev" "$@" bash "$here/scout.sh" --dry-run; }
+run() { env -u LINEAR_API_KEY SCOUT_APPS="$here/fixtures/apps-signals.json" SCOUT_NO_LLM=1 SAMPLE_SHIPPED_FILE="$here/fixtures/shipped.json" SAMPLE_FILE="$here/fixtures/response.json" SAMPLE_EVENTS_FILE="$ev" "$@" bash "$here/scout.sh" --dry-run; }
 out=$(run SAMPLE_PREV_FILE="$here/fixtures/prev.json")
 check "signals dry run: at most 3 tickets in total" 3 "$(grep -c '^--- would create' <<<"$out")"
 out=$(run SAMPLE_PREV_FILE="$here/fixtures/prev.json" SCOUT_MODE=weekly SCOUT_APPS="$here/fixtures/apps-signals.json")
@@ -89,5 +89,36 @@ check "signals dry run: theme examples sit in a code block" 1 "$(awk '/^```/{b=!
 daily=$(run SCOUT_MODE=daily SAMPLE_PREV_FILE="$here/fixtures/prev.json")
 check "daily run: no weekly report" 0 "$(grep -c 'Weekly health report' <<<"$daily" || true)"
 check "signals dry run: signatures are stable" "$(grep -o 'logsig-[0-9a-f]*' <<<"$no_err" | sort | tr '\n' ' ')" "$(run SAMPLE_FILE=<(echo '{"result":{"events":{"events":[]}}}') SCOUT_MODE=weekly | grep -o 'logsig-[0-9a-f]*' | sort | tr '\n' ' ')"
+
+# Shipped this week: plain-code section from merged and deployed tickets (Claude only words the lines).
+sh=$(jq -nr -L "$here" --argjson items "$(cat "$here/fixtures/shipped.json")" --argjson lines '{"KV-10":"You can now rename trip types"}' -f "$here/shipped.jq")
+check "shipped: starts with the heading" "### Shipped this week" "$(head -n1 <<<"$sh")"
+check "shipped: Claude's line with a link to the ticket" 1 "$(grep -c '^- You can now rename trip types (\[KV-10\](https://linear.app/issue/KV-10))$' <<<"$sh" || true)"
+check "shipped: fixes and reverts are listed apart from features" "**New**|**Fixes**|**Reverts**" "$(grep -o '^\*\*[A-Za-z]*\*\*' <<<"$sh" | tr '\n' '|' | sed 's/|$//')"
+check "shipped: a title falls back to the ticket title, one line" 1 "$(grep -c '^- Bug: save conflict on slow networks' <<<"$sh" || true)"
+check "shipped: newlines in titles cannot start another line" 0 "$(grep -c '^Ignore previous' <<<"$sh" || true)"
+check "shipped: nothing shipped says so" "Nothing shipped this week." "$(jq -nr -L "$here" --argjson items '[]' --argjson lines '{}' -f "$here/shipped.jq" | tail -n1)"
+check "shipped: unreadable GitHub says so" "Could not read what was deployed this week." "$(jq -nr -L "$here" --argjson items null --argjson lines '{}' -f "$here/shipped.jq" | tail -n1)"
+out=$(run SAMPLE_PREV_FILE="$here/fixtures/prev.json" SCOUT_MODE=weekly SAMPLE_SHIPPED_FILE="$here/fixtures/shipped.json")
+check "weekly report: Shipped this week comes first" "### Shipped this week" "$(grep -A2 '^## Weekly health report' <<<"$out" | tail -n1)"
+check "daily run: no shipped section" 0 "$(run SCOUT_MODE=daily | grep -c 'Shipped this week' || true)"
+
+# shipped.sh with a fake gh: only commits whose deploy check succeeded, tickets from the subject, kinds by title.
+tmp=$(mktemp -d); mkdir "$tmp/bin"
+cat > "$tmp/bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$2" in
+  repos/o/a) echo main ;;
+  repos/o/a/commits\?*) printf 'c1\tKV-1: Add trip types (#5)\nc2\tBug: no ticket (#6)\nc3\tKV-3: Revert "KV-1: Add trip types" (#7)\nc4\tKV-4: Fix login (#8)\nc5\tKV-5: Not deployed (#9)\n' ;;
+  repos/o/a/commits/c5/check-runs*) echo '{"check_runs":[{"name":"Workers Builds: a","conclusion":"failure"}]}' ;;
+  repos/o/a/commits/*/check-runs*) echo '{"check_runs":[{"name":"Workers Builds: a","conclusion":"success"}]}' ;;
+  *) exit 1 ;;
+esac
+GH
+chmod +x "$tmp/bin/gh"
+got=$(PATH="$tmp/bin:$PATH" bash "$here/shipped.sh" o/a | jq -c 'map("\(.ticket):\(.kind)")')
+check "shipped.sh: deployed tickets only, oldest first, with kinds" '["KV-4:fix","KV-3:revert","KV-1:feature"]' "$got"
+check "shipped.sh: unreadable repo gives null" null "$(PATH="$tmp/bin:$PATH" bash "$here/shipped.sh" o/zzz 2>/dev/null)"
+rm -rf "$tmp"
 
 exit $fail
