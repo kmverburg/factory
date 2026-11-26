@@ -16,6 +16,7 @@ set -eo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$here/../lib/linear.sh"
 source "$here/../lib/issue-writer.sh"
+source "$here/../lib/usage-limit.sh"
 [ "$1" = "--dry-run" ] && DRY_RUN=1
 MAX_NEW=3
 LABEL="source:logs"
@@ -27,6 +28,18 @@ if [ -z "$MODE" ]; then
   if [ -n "$DRY_RUN" ] || [ "$(date -u +%u)" = 1 ]; then MODE=weekly; else MODE=daily; fi
 fi
 if [ "$MODE" = weekly ]; then WINDOW_HOURS=168; WINDOW_LABEL="last 7 days"; else WINDOW_HOURS=24; WINDOW_LABEL="last 24 hours"; fi
+
+# Before anything is written: if Claude's usage limit is reached, print "SCOUT_RETRY_AT=<reset, epoch seconds>" and exit 75, so agents/scout/run.sh can wait and start the scout again (docs/usage-limits.md).
+# A limit that is reached halfway still falls back to the plain text, as before.
+probe_usage_limit() {
+  local out
+  [ -z "$DRY_RUN" ] && [ -z "$SCOUT_NO_LLM" ] && command -v claude >/dev/null || return 0
+  out=$(env -u CLOUDFLARE_OBSERVABILITY_TOKEN -u CLOUDFLARE_ACCOUNT_ID -u LINEAR_API_KEY claude -p --max-turns 1 <<<"Reply with the word ok." 2>&1) && return 0
+  usage_limit_hit "$out" || return 0
+  echo "::notice::Claude's usage limit was reached; the scout will run again after it resets"
+  echo "SCOUT_RETRY_AT=$(usage_limit_reset "$out")"
+  exit 75
+}
 
 # $1 = prompt, $2 = first line Claude's answer must start with, $3 = directory to run in. Prints the answer, or fails.
 ask_claude() {
@@ -293,6 +306,7 @@ scan_app() {
   fi
 }
 
+probe_usage_limit
 while IFS= read -r app; do
   scan_app "$app" || { echo "::warning::Scan of $(jq -r .project <<<"$app") failed"; FAILED=1; }
 done < <(jq -c '.[]' "$apps_file")

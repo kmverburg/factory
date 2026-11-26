@@ -51,6 +51,8 @@ jobs:
       FIX_REQUESTED: ${{ github.event.client_payload.requested }}
       # "true" when the update job found merge conflicts with the base branch (KV-49)
       FIX_CONFLICT: ${{ github.event.client_payload.conflict }}
+      # The event's payload as sent, so a retry after Claude's usage limit starts the same run (docs/usage-limits.md)
+      FACTORY_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
       HAS_APP: ${{ secrets.FACTORY_APP_ID != '' }}
 
     steps:
