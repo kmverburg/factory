@@ -34,7 +34,7 @@ if [ "$MODE" = weekly ]; then WINDOW_HOURS=168; WINDOW_LABEL="last 7 days"; else
 probe_usage_limit() {
   local out
   [ -z "$DRY_RUN" ] && [ -z "$SCOUT_NO_LLM" ] && command -v claude >/dev/null || return 0
-  out=$(env -u CLOUDFLARE_OBSERVABILITY_TOKEN -u CLOUDFLARE_ACCOUNT_ID -u LINEAR_API_KEY claude -p --max-turns 1 <<<"Reply with the word ok." 2>&1) && return 0
+  out=$(env -u CLOUDFLARE_OBSERVABILITY_TOKEN -u CLOUDFLARE_ACCOUNT_ID -u LINEAR_API_KEY -u GH_TOKEN claude -p --max-turns 1 <<<"Reply with the word ok." 2>&1) && return 0
   usage_limit_hit "$out" || return 0
   echo "::notice::Claude's usage limit was reached; the scout will run again after it resets"
   echo "SCOUT_RETRY_AT=$(usage_limit_reset "$out")"
@@ -45,7 +45,7 @@ probe_usage_limit() {
 ask_claude() {
   local out
   [ -z "$SCOUT_NO_LLM" ] && command -v claude >/dev/null || return 1
-  out=$(cd "${3:-.}" && env -u CLOUDFLARE_OBSERVABILITY_TOKEN -u CLOUDFLARE_ACCOUNT_ID -u LINEAR_API_KEY claude -p --max-turns 15 --allowedTools "Read,Grep,Glob" <<<"$1" 2>/dev/null) || return 1
+  out=$(cd "${3:-.}" && env -u CLOUDFLARE_OBSERVABILITY_TOKEN -u CLOUDFLARE_ACCOUNT_ID -u LINEAR_API_KEY -u GH_TOKEN claude -p --max-turns 15 --allowedTools "Read,Grep,Glob" <<<"$1" 2>/dev/null) || return 1
   grep -q "$2" <<<"$out" || return 1
   echo "$out"
 }
