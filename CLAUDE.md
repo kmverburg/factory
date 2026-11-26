@@ -46,6 +46,7 @@ Once a day (the schedule workflow is added by Koen) `agents/scout/scout.sh` read
 - Linear calls must never fail a run: helpers in `lib/linear.sh` warn and carry on.
 - Never print or log tokens, API keys or webhook secrets.
 - Linear status names are matched case-insensitively ("Agent Ready", "Agent Working", "Needs Human", "In Review", "Todo").
+- When a change adds or removes a part shown in the diagrams in `docs/architecture.md` (an input, an agent, a workflow, an outside service, a ticket status), update the diagrams in the same PR. The reviewer checks this.
 - Keep prompts short and concrete; every rule in a prompt should be checkable.
 
 ## Off-limits

@@ -2,6 +2,8 @@
 
 Linear tickets in, reviewed pull requests out.
 
+**See [docs/architecture.md](docs/architecture.md) for diagrams of how all the parts fit together.**
+
 ```
 Linear issue → "Agent Ready"
    │  webhook
