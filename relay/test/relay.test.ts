@@ -676,6 +676,37 @@ describe("Linear comment commands", () => {
     }
   });
 
+  it("treats a reply of only approving words as approval", async () => {
+    for (const text of ["yes", "Yes, approve", "approve", "OK", "ok.", "lgtm", "LGTM!", "go ahead", "Go ahead.", "ja", "Ja, approve!", " yes yes ", "okay"]) {
+      calls = [];
+      await send(comment(text));
+      expect(dispatches(), text).toHaveLength(1);
+      expect(dispatches()[0].body.event_type, text).toBe("factory-approve");
+      expect(comments()[0], text).toMatch(/^🏭 👍 Approving .* once checks pass/);
+    }
+  });
+
+  it("keeps a reply with more content a change request", async () => {
+    for (const text of ["yes but rename the button", "approve after fixing the typo", "Merge conflict, solve that", "ok go", "yes please"]) {
+      calls = [];
+      await send(comment(text));
+      expect(dispatches(), text).toHaveLength(1);
+      expect(dispatches()[0].body.event_type, text).toBe("factory-fix");
+      expect(comments()[0], text).toMatch(/^🏭 🔧 Sending your comment to the builder as a fix round/);
+    }
+  });
+
+  it("answers a bare no on an escalated PR without starting a fix round", async () => {
+    pulls = [agentPr({ labels: [{ name: "agent-built" }, { name: "needs-human" }] })];
+    for (const text of ["no", "No.", "nee"]) {
+      calls = [];
+      await send(comment(text));
+      expect(dispatches(), text).toHaveLength(0);
+      expect(comments(), text).toHaveLength(1);
+      expect(comments()[0]).toMatch(/^🏭 .*What should change\?/);
+    }
+  });
+
   it("asks for changes: dispatches an uncounted factory-fix with the instructions", async () => {
     await send(comment("change: make the button blue\nand bigger"));
     expect(dispatches()).toHaveLength(1);

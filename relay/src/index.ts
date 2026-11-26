@@ -185,15 +185,39 @@ const FIX_ROUND_WINDOW_MS = 2 * 60 * 1000;
 const FIX_ROUND_REPLY = "🏭 🔧 Sending your comment to the builder as a fix round";
 const ANSWERS_HEADING = "## Answers from Koen";
 
-type Command = { kind: "approve" } | { kind: "change"; instructions: string };
+type Command = { kind: "approve" } | { kind: "decline" } | { kind: "change"; instructions: string };
+
+/** The one list of approving words and phrases (documented in docs/linear-commands.md). */
+const APPROVING_WORDS = ["approve", "approved", "yes", "yep", "yeah", "y", "ok", "okay", "lgtm", "go ahead", "ja"];
+/** A reply of only one of these says no, which is not an instruction. */
+const DECLINING_WORDS = ["no", "nee"];
+
+/** Lowercase, punctuation to spaces, whitespace collapsed ("Yes, approve!" -> "yes approve"). */
+function normalizeReply(body: string): string {
+  return body.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+/** True when the text is made up only of approving words and phrases. */
+function isApproval(body: string): boolean {
+  let rest = normalizeReply(body);
+  if (!rest) return false;
+  const phrases = [...APPROVING_WORDS].sort((a, b) => b.length - a.length);
+  while (rest) {
+    const hit = phrases.find((w) => rest === w || rest.startsWith(`${w} `));
+    if (!hit) return false;
+    rest = rest.slice(hit.length).trim();
+  }
+  return true;
+}
 
 /**
- * A comment that is only "approve" or "/approve" (any case, surrounding spaces, optional trailing full stop) approves.
- * Every other comment is a change request with the whole comment as instructions, so "Merge conflict, solve that"
- * can never merge anything. Null for an empty comment.
+ * A comment made up only of approving words (see APPROVING_WORDS; case, punctuation and surrounding spaces are
+ * ignored) approves; only "no"/"nee" declines. Every other comment is a change request with the whole comment as
+ * instructions, so "Merge conflict, solve that" can never merge anything. Null for an empty comment.
  */
 function parseCommand(body: string): Command | null {
-  if (/^\s*\/?approve\s*\.?\s*$/i.test(body)) return { kind: "approve" };
+  if (isApproval(body)) return { kind: "approve" };
+  if (DECLINING_WORDS.includes(normalizeReply(body))) return { kind: "decline" };
   const instructions = body.trim();
   return instructions ? { kind: "change", instructions } : null;
 }
@@ -311,6 +335,16 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
     return;
   }
 
+  if (command.kind === "decline") {
+    const escalated = awaitingAnswer || pr.labels.some((l) => l.name === "needs-human");
+    if (escalated) {
+      await addComment(issue.id, `🏭 Understood, ${pr.html_url} stays as it is. What should change? Reply with the change you want and I'll send it to the builder, or \`approve\` to merge it as it is.`, env);
+      return;
+    }
+    // Not escalated: "no" is just a (useless but harmless) change request, as before.
+    return sendFixRound(issue, pr, repo, "no", env);
+  }
+
   if (command.kind === "approve") {
     const response = await dispatchBuild(repo, {
       event_type: "factory-approve",
@@ -325,6 +359,10 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
     return;
   }
 
+  return sendFixRound(issue, pr, repo, command.instructions, env);
+}
+
+async function sendFixRound(issue: LinearIssue, pr: PullRequest, repo: string, instructions: string, env: Env): Promise<void> {
   const response = await dispatchBuild(repo, {
     event_type: "factory-fix",
     client_payload: {
@@ -332,7 +370,7 @@ async function handleComment(data: { id?: string; issueId: string; body: string 
       round: "0",
       requested: "true",
       identifier: issue.identifier,
-      feedback: command.instructions.slice(0, MAX_DESCRIPTION_CHARS),
+      feedback: instructions.slice(0, MAX_DESCRIPTION_CHARS),
     },
   }, env);
   if (!response.ok) {
