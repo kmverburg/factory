@@ -15,10 +15,13 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 fd="$tmp/factory"; mkdir -p "$fd/agents/lib" "$fd/agents/review" "$fd/agents/build" "$tmp/bin"
 cp "$root"/agents/review/{publish,workflows,learn}.sh "$root"/agents/review/categories.json "$root"/agents/review/learn.jq "$fd/agents/review/"
 cp "$root/agents/build/publish.sh" "$fd/agents/build/"
+cp "$root/agents/lib/conflicts.sh" "$fd/agents/lib/"
 cat > "$fd/agents/lib/linear.sh" <<'STUB'
 for f in linear_comment linear_set_state linear_set_group_label linear_upload_image; do
   eval "$f() { echo \"$f \$*\" >> \"\$LINEAR_LOG\"; }"
 done
+# The ticket's current status (for the Conflicts helpers): $LINEAR_STATE, "In Review" when unset.
+linear_state_of() { printf '%s\t%s\n' "${LINEAR_STATE:-In Review}" started; }
 STUB
 cat > "$fd/agents/lib/issue-writer.sh" <<'STUB'
 # Records the call and prints one line per ticket it was given, like the real helper.
@@ -28,7 +31,11 @@ STUB
 cat > "$tmp/bin/gh" <<'GH'
 #!/usr/bin/env bash
 echo "$*" >> "$GH_LOG"
-case "$1 $2" in "pr view") echo 7 ;; esac
+case "$*" in
+  *"--json mergeable"*) echo "${MERGEABLE:-MERGEABLE}" ;;
+  *"--json labels"*) echo "${PR_NEEDS_HUMAN:-false}" ;;
+  "pr view"*) echo 7 ;;
+esac
 GH
 # git is real, except that nothing is pushed and the remote isn't touched.
 real_git=$(command -v git)
@@ -46,6 +53,12 @@ review() {
   printf '{"files":[{"path":"src/app.ts"}]}' > "$w/.factory-review/pr.json"
   printf 'diff --git a/src/app.ts b/src/app.ts\n' > "$w/.factory-review/diff.patch"
   printf '%s' "$verdict" > "$w/.factory-review/verdict.json"
+  rm -f "$w"/.factory-review/{merge.json,conflict-round,was-escalated,conflict-files.txt,conflicting-files.txt,previous-decision.txt,previous-categories.txt}
+  [ -z "$MERGE" ] || printf '{"mergeable":"%s"}' "$MERGE" > "$w/.factory-review/merge.json"
+  for m in $MARKS; do touch "$w/.factory-review/$m"; done
+  [ -z "$CFILES" ] || printf '%s\n' "$CFILES" > "$w/.factory-review/conflict-files.txt"
+  [ -z "$PREV_DECISION" ] || printf '%s\n' "$PREV_DECISION" > "$w/.factory-review/previous-decision.txt"
+  [ -z "$PREV_CATS" ] || printf '%s\n' "$PREV_CATS" > "$w/.factory-review/previous-categories.txt"
   : > "$tmp/$name.gh"; : > "$tmp/$name.linear"
   local rc=0
   (cd "$w" && env PATH="$tmp/bin:$PATH" GH_LOG="$tmp/$name.gh" LINEAR_LOG="$tmp/$name.linear" FACTORY_DIR="$fd" \
@@ -86,6 +99,37 @@ check "review escalate: category marker in the PR comment" 1 "$(count '<!-- fact
 check "review escalate: Linear comment starts with the decision" 1 "$(count 'linear_comment KV-1 🙋 **What you need to decide:**' "$tmp/re.linear")"
 check "review no verdict: escalates" 1 "$(review rh 'not json' >/dev/null; count 'add-label needs-human' "$tmp/rh.gh")"
 
+# GitHub's merge status and conflict rounds (KV-80).
+check "review approve, PR conflicts: exit code" 0 "$(MERGE=CONFLICTING review rm1 "$approve")"
+check "review approve, PR conflicts: not approved" 0 "$(count 'add-label agent-approved' "$tmp/rm1.gh")"
+check "review approve, PR conflicts: no auto-merge" 0 "$(count 'pr merge' "$tmp/rm1.gh")"
+check "review approve, PR conflicts: conflict round dispatched" 1 "$(jq '.client_payload.conflict == "true"' "$tmp/w-rm1/dispatch.json" | grep -c true || true)"
+check "review approve, PR conflicts: round number unchanged" 0 "$(jq -r .client_payload.round "$tmp/w-rm1/dispatch.json")"
+check "review approve, PR conflicts: ticket in Conflicts" 1 "$(LINEAR_STATE=Todo count 'linear_set_state KV-1 Conflicts' "$tmp/rm1.linear")"
+check "review approve, mergeable: approved as before" 1 "$(MERGE=MERGEABLE review rm2 "$approve" >/dev/null; count 'add-label agent-approved' "$tmp/rm2.gh")"
+check "review approve, PR conflicts, not an agent PR: escalates" 1 "$(MERGE=CONFLICTING review rm3 "$approve" AGENT_PR=false >/dev/null; count 'add-label needs-human' "$tmp/rm3.gh")"
+check "review conflict round, still conflicting: escalates" 1 "$(MERGE=CONFLICTING MARKS=conflict-round review rm4 "$approve" >/dev/null; count 'add-label needs-human' "$tmp/rm4.gh")"
+check "review conflict round, still conflicting: no new dispatch" 0 "$(count 'dispatches' "$tmp/rm4.gh")"
+
+# After a conflict round on an escalated PR: stays escalated, whatever the verdict, with the earlier question kept.
+conflict_verdict='{"decision":"approve","risk":"low","summary":"Merged.","reasons":[],"fix_requests":[],"follow_ups":[],"conflict_note":"Kept both test lists; the question for Koen is unchanged.","checks":"c"}'
+check "escalated PR, conflict round, approve: exit code" 0 "$(MERGE=MERGEABLE MARKS='conflict-round was-escalated' CFILES=agents/ci/run.sh PREV_DECISION='Allow the new dependency?' PREV_CATS=dependency-dev review rc1 "$conflict_verdict")"
+check "escalated PR, conflict round, approve: needs-human kept" 1 "$(count 'add-label needs-human' "$tmp/rc1.gh")"
+check "escalated PR, conflict round, approve: not approved" 0 "$(count 'add-label agent-approved' "$tmp/rc1.gh")"
+check "escalated PR, conflict round, approve: no auto-merge" 0 "$(count 'pr merge' "$tmp/rc1.gh")"
+check "escalated PR, conflict round: earlier question kept" 'Allow the new dependency?' "$(jq -r .decision_needed "$tmp/w-rc1/.factory-review/verdict.json")"
+check "escalated PR, conflict round: earlier categories kept" dependency-dev "$(jq -r '.categories | join(",")' "$tmp/w-rc1/.factory-review/verdict.json")"
+check "escalated PR, conflict round: files listed in the PR comment" 1 "$(count '- agents/ci/run.sh' "$tmp/w-rc1/comment.md")"
+check "escalated PR, conflict round: note in the PR comment" 1 "$(count 'Kept both test lists' "$tmp/w-rc1/comment.md")"
+check "escalated PR, conflict round: escalation stays, said so" 1 "$(count 'The escalation stays' "$tmp/w-rc1/comment.md")"
+check "escalated PR, conflict round: no second learning marker" 0 "$(count 'factory-escalation' "$tmp/w-rc1/comment.md")"
+check "escalated PR, conflict round: Linear gets the files" 1 "$(count '- agents/ci/run.sh' "$tmp/rc1.linear")"
+check "escalated PR, conflict round: Linear Needs Human" 1 "$(count 'linear_set_state KV-1 Needs Human' "$tmp/rc1.linear")"
+check "escalated PR, conflict round, fix verdict: stays escalated" 1 "$(MERGE=MERGEABLE MARKS='conflict-round was-escalated' review rc2 "$fix" >/dev/null; count 'add-label needs-human' "$tmp/rc2.gh")"
+check "escalated PR, conflict round, fix verdict: no dispatch" 0 "$(count 'dispatches' "$tmp/rc2.gh")"
+check "normal PR, conflict round, approve: approved, with the note" 1 "$(MERGE=MERGEABLE MARKS=conflict-round CFILES=a.txt review rc3 "$conflict_verdict" >/dev/null; count 'add-label agent-approved' "$tmp/rc3.gh")"
+check "normal PR, conflict round: note in the PR comment" 1 "$(count 'Kept both test lists' "$tmp/w-rc3/comment.md")"
+
 # ---- build/publish.sh -----------------------------------------------------------------------------------------
 # $1 = name, $2 = setup commands run in the repo (before the script), then VAR=value overrides.
 build() {
@@ -121,4 +165,19 @@ check "build fix round: exit code" 0 "$(build bf "$change" EVENT_TYPE=factory-fi
 check "build fix round: comments on the PR" 1 "$(count 'pr comment 3 --body-file' "$tmp/bf.gh")"
 check "build fix round: pushes without force" 1 "$(count 'git push origin factory/kv-1' "$tmp/bf.gh")"
 check "build conflict markers: nothing pushed" 0 "$(build bc 'printf "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> x\n" > f.txt; git add f.txt' EVENT_TYPE=factory-fix PR_NUMBER=3 FIX_CONFLICT=true >/dev/null; count 'git push' "$tmp/bc.gh")"
+
+# A conflict round must really merge the base branch (KV-80). origin/main is a commit on a side branch here.
+side='git checkout -qb side; echo m > m.txt; git add -A; git commit -qm m; git update-ref refs/remotes/origin/main HEAD; git checkout -q main; echo new >> f.txt; git commit -qam new'
+cr=(EVENT_TYPE=factory-fix PR_NUMBER=3 FIX_CONFLICT=true BASE_BRANCH=main MERGEABLE_WAIT=0)
+check "build conflict round, not merged: exit code" 0 "$(build bx "$side" "${cr[@]}")"
+check "build conflict round, not merged: nothing pushed" 0 "$(count 'git push' "$tmp/bx.gh")"
+check "build conflict round, not merged: says so on the PR" 1 "$(count "doesn't contain" "$tmp/bx.gh")"
+check "build conflict round, not merged: needs-human" 1 "$(count 'add-label needs-human' "$tmp/bx.gh")"
+check "build conflict round, not merged: Linear Needs Human" 1 "$(count 'linear_set_state KV-1 Needs Human' "$tmp/bx.linear")"
+check "build conflict round, merged: exit code" 0 "$(build bg "$side; git merge -q --no-edit side" "${cr[@]}")"
+check "build conflict round, merged: pushed" 1 "$(count 'git push origin factory/kv-1' "$tmp/bg.gh")"
+check "build conflict round, merged: ticket back to In Review" 1 "$(count 'linear_set_state KV-1 In Review' "$tmp/bg.linear")"
+check "build conflict round, merged, escalated PR: back to Needs Human" 1 "$(build bh "$side; git merge -q --no-edit side" "${cr[@]}" PR_NEEDS_HUMAN=true >/dev/null; count 'linear_set_state KV-1 Needs Human' "$tmp/bh.linear")"
+check "build conflict round, GitHub still conflicts: failed" 1 "$(build bk "$side; git merge -q --no-edit side" "${cr[@]}" MERGEABLE=CONFLICTING >/dev/null; count 'still reports a conflict' "$tmp/bk.gh")"
+check "build conflict round, GitHub still conflicts: no pr_number output" 0 "$(count 'pr_number=' "$tmp/bk.output")"
 exit $fail

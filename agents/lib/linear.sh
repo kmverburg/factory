@@ -173,3 +173,7 @@ linear_issue_comments() {
   linear_gql 'query($id: String!) { issue(id: $id) { comments(first: 100) { nodes { body createdAt } } } }' \
     "$(jq -n --arg id "$1" '{id: $id}')" | jq -c '.data.issue.comments.nodes'
 }
+# $1 = issue identifier or id. Prints "<state name><TAB><state type>", or nothing when the lookup fails.
+linear_state_of() {
+  linear_issue "$1" 2>/dev/null | jq -r '.data.issue.state | select(. != null) | "\(.name)\t\(.type)"' 2>/dev/null || true
+}

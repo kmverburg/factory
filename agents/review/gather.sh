@@ -40,3 +40,32 @@ echo "is_follow_up=$is_follow_up" >> "$GITHUB_OUTPUT"
 # Other CI checks (not the factory's own jobs): wait for them, then save what failed.
 checks_wait || true
 checks_collect_failed .factory-review/checks || echo "::warning::Couldn't collect check details."
+
+# GitHub's own merge status (KV-80): a conflicting PR is never approved. GitHub needs a moment after a push to work it out.
+for _ in $(seq 1 "${MERGEABLE_TRIES:-6}"); do
+  gh pr view "$PR_NUMBER" --json mergeable,mergeStateStatus > .factory-review/merge.json 2>/dev/null || echo '{}' > .factory-review/merge.json
+  [ "$(jq -r '.mergeable // "UNKNOWN"' .factory-review/merge.json)" != "UNKNOWN" ] && break
+  sleep "${MERGEABLE_WAIT:-5}"
+done
+if [ "$(jq -r '.mergeable // "UNKNOWN"' .factory-review/merge.json)" = "CONFLICTING" ]; then
+  # Which files conflict, from a trial merge that is undone straight away.
+  git -c user.name=factory-bot -c user.email=factory-bot@users.noreply.github.com merge --no-commit --no-ff "origin/$base" </dev/null >/dev/null 2>&1 || true
+  git diff --name-only --diff-filter=U > .factory-review/conflicting-files.txt 2>/dev/null || true
+  git merge --abort 2>/dev/null || git reset -q --hard
+fi
+
+# Did a builder conflict round just finish (its comment is the latest on the PR)? And was the PR escalated before it?
+# Then the review only checks the resolution: it never lifts the escalation (publish.sh).
+gh pr view "$PR_NUMBER" --json comments,labels > "$RUNNER_TEMP/pr-comments.json" 2>/dev/null || echo '{}' > "$RUNNER_TEMP/pr-comments.json"
+if [ "$(jq -r '.comments[-1].body // "" | startswith("### 🔧 Builder resolved merge conflicts")' "$RUNNER_TEMP/pr-comments.json")" = "true" ]; then
+  touch .factory-review/conflict-round
+  # Files the builder resolved: those that differ from both parents of the merge commit.
+  if [ "$(git rev-list --parents -n1 HEAD | wc -w)" = "3" ]; then git show --cc --name-only --format= HEAD > .factory-review/conflict-files.txt || true; fi
+  if jq -e '[.labels[]?.name] | index("needs-human") != null' "$RUNNER_TEMP/pr-comments.json" >/dev/null; then
+    touch .factory-review/was-escalated
+    # What Koen was asked, and why, from the last escalation, so the verdict can keep it.
+    jq -r '[.comments[] | select(.body | test("<!-- factory-escalation: "))] | last | .body // empty' "$RUNNER_TEMP/pr-comments.json" > "$RUNNER_TEMP/last-escalation.md"
+    sed -nE 's/^\*\*What you need to decide:\*\* //p' "$RUNNER_TEMP/last-escalation.md" | head -n1 > .factory-review/previous-decision.txt
+    sed -nE 's/.*<!-- factory-escalation: ([^ ]*) -->.*/\1/p' "$RUNNER_TEMP/last-escalation.md" | head -n1 > .factory-review/previous-categories.txt
+  fi
+fi

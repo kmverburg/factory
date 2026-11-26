@@ -182,6 +182,15 @@ reset; pr kv-2-thing agent-built
 STATE=Done STATE_TYPE=completed run
 check "ticket already done: left alone" 0 "$(dispatches)"
 
+# In Conflicts (KV-80): a PR without a verdict label that waits in Conflicts is left to Koen, not reviewed again; one with
+# a conflict round running (agent-fixing) is busy.
+reset; pr kv-2-thing agent-built
+STATE=Conflicts run
+check "ticket in Conflicts, PR without verdict: left alone" 0 "$(dispatches)"
+reset; pr kv-2-thing agent-built,agent-fixing
+{ run_obj 25 in_progress "" repository_dispatch "Factory KV-2" main; } | runs
+STATE=conflicts run
+check "ticket in Conflicts, conflict round running: busy, not stuck" "0 0 0" "$(dispatches) $(moved_to s-ready) $(moved_to s-nh)" 
 reset; pr kv-2-thing agent-built
 { run_obj 24 completed failure repository_dispatch "Factory KV-2" main; } | runs
 comments '[{"body":"x\n<!-- stuck-check:review prev=https://github.com/o/backpack/actions/runs/21 -->","createdAt":"2026-01-02T10:00:00Z"}]'
