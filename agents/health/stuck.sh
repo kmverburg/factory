@@ -20,6 +20,8 @@ ROOT=$(cd "$here/../.." && pwd)
 source "$here/../lib/linear.sh"
 # shellcheck source=checks.sh
 source "$here/checks.sh"
+# shellcheck source=../lib/usage-limit.sh
+source "$here/../lib/usage-limit.sh"
 [ "$1" = "--dry-run" ] && DRY_RUN=1
 : "${FACTORY_REPO:?FACTORY_REPO is required}"
 WRANGLER_CONFIG=${WRANGLER_CONFIG:-$ROOT/relay/wrangler.jsonc}
@@ -102,6 +104,7 @@ check_ticket() {
   last=$(jq -c '[.[] | select(.status == "completed")] | sort_by(.created) | last // empty' <<<"$mine")
   link=$(run_link "$last")
   comments=$(linear_issue_comments "$id" 2>/dev/null) || comments="[]"
+  if [ -n "$(retry_pending "$comments" "$NOW")" ]; then say "$id: waiting for a retry after Claude's usage limit, left alone."; return; fi
   marker=$(last_marker "$comments" ticket)
   pr=$(pr_of "$repo" "$id")
   if [ -n "$marker" ] && [ $((NOW - $(epoch "$(jq -r .createdAt <<<"$marker")"))) -le "$WINDOW" ]; then
@@ -155,6 +158,7 @@ check_prs() {
     last=$(jq -c '[.[] | select(.status == "completed")] | sort_by(.created) | last // empty' <<<"$mine")
     link=$(run_link "$last")
     comments=$(linear_issue_comments "$id" 2>/dev/null) || comments="[]"
+    if [ -n "$(retry_pending "$comments" "$NOW")" ]; then say "PR #$n ($id): waiting for a retry after Claude's usage limit, left alone."; continue; fi
     marker=$(last_marker "$comments" review)
     if [ -n "$marker" ] && [ $((NOW - $(epoch "$(jq -r .createdAt <<<"$marker")"))) -le "$WINDOW" ]; then
       if [ $((NOW - $(epoch "$(jq -r .createdAt <<<"$marker")"))) -le "$AFTER" ]; then say "PR #$n ($id): the review was started again less than an hour ago, left alone."; continue; fi
@@ -179,6 +183,7 @@ check_prs() {
     '.[] | select((.isDraft | not) and ((.labels | map(.name)) as $l | ($v | map(. as $x | $l | index($x)) | any | not)))' <<<"$PRS")
 }
 
+# Tickets waiting for a retry after Claude's usage limit (agents/retry/retry.sh) are left alone.
 # Runs only matter if they are readable: a repo whose runs can't be listed is skipped, never judged.
 while IFS=$'\t' read -r repo project _; do
   runs=$(gh api "repos/$repo/actions/workflows/factory.yml/runs?per_page=100" \

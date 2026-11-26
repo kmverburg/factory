@@ -121,3 +121,12 @@ jobs:
           IS_FOLLOW_UP: ${{ steps.context.outputs.is_follow_up }}
           AGENT_PR: ${{ steps.context.outputs.agent_pr }}
         run: bash "$FACTORY_DIR/agents/review/publish.sh"
+
+      # A failed run because of Claude's usage limit is retried later (docs/usage-limits.md).
+      - name: Retry after usage limit
+        if: failure()
+        env:
+          IDENTIFIER: ${{ steps.context.outputs.identifier }}
+        run: |
+          [ -n "$FACTORY_DIR" ] || exit 0
+          bash "$FACTORY_DIR/agents/review/report-failure.sh"

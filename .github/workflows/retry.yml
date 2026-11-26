@@ -1,0 +1,47 @@
+# Usage limit retries (agents/retry/retry.sh, docs/usage-limits.md): every 10 minutes sends the builder and reviewer
+# events again that Claude's usage limit stopped, once the limit has reset. Can also be started by hand;
+# "dry run" only lists what it found.
+name: Factory usage limit retry
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (only list the retries that are due, change nothing)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # No `repositories` filter: one token for every repo the factory app is installed on (it sends the dispatches).
+      - name: Factory app token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Send due retries
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          FACTORY_REPO: ${{ github.repository }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '' }}
+        run: bash agents/retry/retry.sh
